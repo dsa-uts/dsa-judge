@@ -1,0 +1,4 @@
+FROM ubuntu:24.10
+
+# ユーザーのホームディレクトリに移動する。
+WORKDIR /workdir
