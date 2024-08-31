@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS ArrangedFiles (
 );
 
 -- ArrangedFilesテーブルに初期データを挿入
--- INSERT INTO ArrangedFiles (lecture_id, assignment_id, for_evaluation, path) VALUES
+INSERT INTO ArrangedFiles (lecture_id, assignment_id, for_evaluation, path) VALUES
+(1, 1, false, "filecheck.sh"),
+(1, 1, false, "ex1-1/compilecheck.sh")
+;
 
 -- RequiredFilesテーブル(ユーザに提出を求めれているファイルのリスト)の作成
 CREATE TABLE IF NOT EXISTS RequiredFiles (
@@ -80,7 +83,7 @@ CREATE TABLE IF NOT EXISTS TestCases (
     type ENUM('preBuilt', 'postBuilt', 'Judge') NOT NULL, -- テストケースが実行されるタイミング
     description TEXT, -- どの部分点に相当するかの説明
     score INT, -- テストケースの配点, フォーマットチェック用だったらゼロ
-    script_path VARCHAR(255), -- ./<実行バイナリ> の形式に合わない場合のスクリプトファイルのパス
+    command VARCHAR(255), -- e.g., "./run.sh", "ls", ...
     argument_path VARCHAR(255), -- スクリプトもしくは実行バイナリに渡す引数が記されたファイルのパス
     stdin_path VARCHAR(255), -- 標準入力のパス, path/to/stdin.txt
     stdout_path VARCHAR(255) NOT NULL, -- 想定される標準出力のパス, path/to/stdout.txt
@@ -91,9 +94,9 @@ CREATE TABLE IF NOT EXISTS TestCases (
 
 -- TestCasesテーブルに初期データを挿入
 INSERT INTO TestCases 
-(lecture_id, assignment_id, for_evaluation, type        , description                                        , score, script_path            , argument_path                    , stdin_path, stdout_path                     , stderr_path                     , exit_code) VALUES
-(1         , 1            , false         , 'preBuilt'  , "指定したファイルを提出しているか"                       , 0    , "filecheck.sh"         , "ex1-1/filecheck.arg"            , NULL      , "ex1-1/filecheck.stdout"        , "ex1-1/filecheck.stderr"        , 0),
-(1         , 1            , false         , 'postBuilt' , "gcd_euclid関数がgcd_euclid.cに定義されているかチェック" , 0    , "ex1-1/compilecheck.sh", NULL                             , NULL      , "ex1-1/compilecheck.stdout"     , "ex1-1/compilecheck.stderr"     , 0),
+(lecture_id, assignment_id, for_evaluation, type        , description                                        , score, command                , argument_path                    , stdin_path, stdout_path                     , stderr_path                     , exit_code) VALUES
+(1         , 1            , false         , 'preBuilt'  , "指定したファイルを提出しているか"                       , 0    , "./filecheck.sh"       , "ex1-1/filecheck.arg"            , NULL      , "ex1-1/filecheck.stdout"        , "ex1-1/filecheck.stderr"        , 0),
+(1         , 1            , false         , 'postBuilt' , "gcd_euclid関数がgcd_euclid.cに定義されているかチェック" , 0    , "./compilecheck.sh"    , NULL                             , NULL      , "ex1-1/compilecheck.stdout"     , "ex1-1/compilecheck.stderr"     , 0),
 (1         , 1            , false         , 'Judge'     , "小さい数同士のGCDを求められているか"                    , 10   , NULL                   , "ex1-1/testcases/easy1.arg"      , NULL      , "ex1-1/testcases/easy1.out"     , "ex1-1/testcases/easy1.err"     , 0),
 (1         , 1            , false         , 'Judge'     , "小さい数同士のGCDを求められているか"                    , 10   , NULL                   , "ex1-1/testcases/easy2.arg"      , NULL      , "ex1-1/testcases/easy2.out"     , "ex1-1/testcases/easy2.err"     , 0),
 (1         , 1            , false         , 'Judge'     , "小さい数同士のGCDを求められているか"                    , 10   , NULL                   , "ex1-1/testcases/easy3.arg"      , NULL      , "ex1-1/testcases/easy3.out"     , "ex1-1/testcases/easy3.err"     , 0),

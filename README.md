@@ -48,7 +48,7 @@ erDiagram
 		Enum type "テストケースが実行されるタイミング, preBuilt/postBuilt/Judge"
 		String description "どの部分点に相当するかの説明"
 		Int score "配点"
-		String script_path "実行するスクリプトのパス, NULLABLE"
+		String command "e.g., './run.sh', 'ls', ... NULLなら'./<executable>'になる"
 		String argument_path  "スクリプト/executableの引数のファイルパス"
 		String stdin_path "標準入力のパス, path/to/stdin.txt"
 		String stdout_path "想定される標準出力のパス, path/to/stdout.txt"

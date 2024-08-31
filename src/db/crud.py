@@ -154,7 +154,7 @@ class TestCaseRecord:
     type: TestCaseType # ENUM('preBuilt', 'postBuilt', 'Judge') NOT NULL, -- テストケースが実行されるタイミング
     description: str | None
     score: str | None
-    script_path: str | None
+    command: str | None
     argument_path: str | None
     stdin_path: str | None
     stdout_path: str
@@ -178,7 +178,7 @@ def fetch_testcases(db: Session, lecture_id: int, assignment_id: int, for_evalua
             type=TestCaseType(testcase.type), # cast str to Enum
             description=testcase.description,
             score=testcase.score,
-            script_path=testcase.script_path,
+            command=testcase.command,
             argument_path=testcase.argument_path,
             stdin_path=testcase.stdin_path,
             stdout_path=testcase.stdout_path,

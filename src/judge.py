@@ -208,51 +208,11 @@ class JudgeInfo:
         db = SessionLocal()
         status_aggregator: JudgeSummaryStatusAggregator = JudgeSummaryStatusAggregator(JudgeSummaryStatus.AC)
         for testcase in testcase_list:
-            # ボリューム作成
-            volume, err = initial_volume.clone()
-            if not err.silence():
-                register_judge_result(
-                    db=db,
-                    result=JudgeResultRecord(
-                        submission_id=self.submission_record.id,
-                        testcase_id=testcase.id,
-                        timeMS=0,
-                        memoryKB=0,
-                        exit_code=-1,
-                        stdout='',
-                        stderr=err.message,
-                        result=SingleJudgeStatus.IE
-                    )
-                )
-                status_aggregator.update(JudgeSummaryStatus.IE)
-                continue
-            
             args = []
             
-            # スクリプトが要求されるならそれをボリュームにコピー
-            if testcase.script_path is not None:
-                err = volume.copyFile(
-                    RESOURCE_DIR / testcase.script_path,
-                    Path("./") / Path(testcase.script_path).name
-                )
-                if not err.silence():
-                    test_logger.info(f"err occured when copying script file: {err}")
-                    register_judge_result(
-                        db=db,
-                        result=JudgeResultRecord(
-                            submission_id=self.submission_record.id,
-                            testcase_id=testcase.id,
-                            timeMS=0,
-                            memoryKB=0,
-                            exit_code=-1,
-                            stdout='',
-                            stderr=err.message,
-                            result=SingleJudgeStatus.IE
-                        )
-                    )
-                    status_aggregator.update(JudgeSummaryStatus.IE)
-                    continue
-                args = [f"./{Path(testcase.script_path).name}"]
+            # コマンドが定義されている場合
+            if testcase.command is not None:
+                args.append(testcase.command)
             else:
                 # そうでないなら通常のexecutableをargsに追加
                 args = [f"./{self.problem_record.executable}"]
@@ -302,10 +262,6 @@ class JudgeInfo:
                     )
                 )
                 status_aggregator.update(JudgeSummaryStatus.IE)
-                # ボリュームを削除
-                err = volume.remove()
-                if not err.silence():
-                    test_logger.info(f"failed to remove volume: {volume.name}")
                 continue
             
             # sandbox環境のセットアップ
@@ -313,7 +269,7 @@ class JudgeInfo:
                 name=container_name,
                 arguments=args,
                 workDir="/workdir/",
-                volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+                volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=initial_volume, read_only=True)],
                 timeoutSec=timeoutSec,
                 memoryLimitMB=memoryLimitMB,
                 Stdin=stdin,
@@ -329,12 +285,6 @@ class JudgeInfo:
                 expected_stdout=expected_stdout,
                 expected_stderr=expected_stderr,
             )
-            
-            # ボリュームを削除
-            err = volume.remove()
-            if not err.silence():
-                test_logger.info(f"failed to remove volume: {volume.name}")
-            
             status_aggregator.update(status)
         
         db.close()
