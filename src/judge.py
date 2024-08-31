@@ -313,7 +313,7 @@ class JudgeInfo:
                 name=container_name,
                 arguments=args,
                 workDir="/workdir/",
-                volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+                volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
                 timeoutSec=timeoutSec,
                 memoryLimitMB=memoryLimitMB,
                 Stdin=stdin,
@@ -355,7 +355,7 @@ class JudgeInfo:
             name=container_name,
             arguments=args,
             workDir="/workdir/",
-            volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=working_volume)],
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume)],
             timeoutSec=2.0,
             memoryLimitMB=512
         )

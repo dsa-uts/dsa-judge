@@ -163,7 +163,7 @@ def test_CopyFileFromClientToVolume():
         name="ubuntu",
         arguments=["cat", "test.txt"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
     )
 
     result, err = task.run()
@@ -212,7 +212,7 @@ def test_CopyFilesFromClientToVolume():
         name="ubuntu",
         arguments=["cat", "test1.txt", "test2.txt"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
     )
 
     result, err = task.run()
@@ -261,7 +261,7 @@ def test_RemoveFilesInVolume():
         name="ubuntu",
         arguments=["ls"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
     )
 
     result, err = task.run()
@@ -284,7 +284,7 @@ def test_RemoveFilesInVolume():
         name="ubuntu",
         arguments=["ls"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
     )
 
     result, err = task.run()
@@ -336,7 +336,7 @@ def test_CloneVolume():
             name="ubuntu",
             arguments=["ls"],
             workDir="/workdir/",
-            volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=cloned_volume)],
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=cloned_volume)],
         )
 
         result, err = task.run()
@@ -404,7 +404,7 @@ def test_ForkBomb():
         name="ubuntu",
         arguments=["./fork_bomb.sh"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
         timeoutSec=3.0,
         pidsLimit=10,
     )
@@ -433,7 +433,7 @@ def test_UseManyStack():
         name="gcc:13.3",
         arguments=["g++", "use_many_stack.cpp"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
     )
 
     result, err = task.run()
@@ -448,7 +448,7 @@ def test_UseManyStack():
         name="gcc:13.3",
         arguments=["./a.out"],
         workDir="/workdir/",
-        volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
         stackLimitKB=10240,
         memoryLimitMB=256,
     )
