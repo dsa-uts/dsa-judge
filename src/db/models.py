@@ -49,7 +49,7 @@ class TestCases(Base):
     type = Column(Enum('preBuilt', 'postBuilt', 'Judge'), nullable=False)
     description = Column(String)
     score = Column(Integer)
-    script_path = Column(String(255))
+    command = Column(String(255))
     argument_path = Column(String(255))
     stdin_path = Column(String(255))
     stdout_path = Column(String(255), nullable=False)

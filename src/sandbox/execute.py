@@ -75,7 +75,7 @@ class Volume:
             containerName="ubuntu",
             arguments=["echo", "Hello, World!"],
             workDir="/workdir/",
-            volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=self)],
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=self)],
         )
         if err.message != "":
             return err
@@ -99,7 +99,7 @@ class Volume:
             containerName="ubuntu",
             arguments=["echo", "Hello, World!"],
             workDir="/workdir/",
-            volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=self)],
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=self)],
         )
 
         if err.message != "":
@@ -136,7 +136,7 @@ class Volume:
             containerName="ubuntu",
             arguments=arguments,
             workDir="/workdir/",
-            volumeMountInfo=[VolumeMountInfo(path="/workdir/", volume=self)],
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=self)],
         )
 
         if err.message != "":
@@ -174,7 +174,7 @@ class Volume:
             containerName="ubuntu",
             arguments=["cp", "-a", "/src/.", "/dst/"],
             workDir="/",
-            volumeMountInfo=[
+            volumeMountInfoList=[
                 VolumeMountInfo(path="/src", volume=self),
                 VolumeMountInfo(path="/dst", volume=new_volume)
             ]
@@ -199,6 +199,7 @@ class Volume:
 class VolumeMountInfo:
     path: str  # コンテナ内のマウント先のパス
     volume: Volume  # マウントするボリュームの情報
+    read_only: bool = False
 
 
 # Dockerコンテナの管理クラス
@@ -220,7 +221,7 @@ class ContainerInfo:
         enableNetwork: bool = False,
         enableLoggingDriver: bool = True,
         workDir: str = "/workdir/",
-        volumeMountInfo: list[VolumeMountInfo] = None,
+        volumeMountInfoList: list[VolumeMountInfo] = None,
     ) -> Error:
         # docker create ...
         args = ["create"]
@@ -258,8 +259,11 @@ class ContainerInfo:
         # 作業ディレクトリ
         args += ["--workdir", workDir]
 
-        for volumeMountInfo in volumeMountInfo:
-            args += ["-v", f"{volumeMountInfo.volume.name}:{volumeMountInfo.path}"]
+        for volumeMountInfo in volumeMountInfoList:
+            if volumeMountInfo.read_only:
+                args += ["-v", f"{volumeMountInfo.volume.name}:{volumeMountInfo.path}:ro"]
+            else:
+                args += ["-v", f"{volumeMountInfo.volume.name}:{volumeMountInfo.path}"]
 
         # コンテナイメージ名
         args += [containerName]
@@ -475,7 +479,7 @@ class TaskInfo:
     workDir: str = "/workdir/"  # コンテナ内での作業ディレクトリ
     # cgroupをいじるにはroot権限が必要なので、現状は使わない
     # cgroupParent: str  # cgroupの親ディレクトリ
-    volumeMountInfo: list[VolumeMountInfo] = field(
+    volumeMountInfoList: list[VolumeMountInfo] = field(
         default_factory=list
     )  # ボリュームのマウント情報
     taskMonitor: TaskMonitor = field(
@@ -501,7 +505,7 @@ class TaskInfo:
             enableNetwork=self.enableNetwork,
             enableLoggingDriver=self.enableLoggingDriver,
             workDir=self.workDir,
-            volumeMountInfo=self.volumeMountInfo,
+            volumeMountInfoList=self.volumeMountInfoList,
         )
 
         # Dockerコンテナの作成
