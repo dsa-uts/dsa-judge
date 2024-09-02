@@ -46,7 +46,7 @@ class Volume:
         err = ""
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to create volume: {e}"
 
@@ -63,7 +63,7 @@ class Volume:
         err = ""
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to remove volume: {e}"
 
@@ -305,7 +305,7 @@ class ContainerInfo:
         SANDBOX_LOGGER.debug(f"remove container command: {cmd}")
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to remove container: {e}"
 
@@ -322,7 +322,7 @@ class ContainerInfo:
         SANDBOX_LOGGER.debug(f"copy container command: {cmd}")
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to copy file: {e}"
 
@@ -566,7 +566,7 @@ class TaskInfo:
             # まだ実行中の場合があるので、docker stop...で停止させる。
             stop_cmd = ["docker", "stop", containerInfo.containerID]
             SANDBOX_LOGGER.debug(stop_cmd)
-            resultForStop = subprocess.run(stop_cmd, check=False)
+            resultForStop = subprocess.run(stop_cmd, check=False, capture_output=True)
             if resultForStop.returncode != 0:
                 message = f"failed to stop docker: {containerInfo.containerID}"
                 SANDBOX_LOGGER.error(message)
