@@ -21,10 +21,11 @@ import logging
 # 内部定義モジュールのインポート
 from .my_error import Error
 
-# ロガーの設定
-logging.basicConfig(level=logging.INFO)
-test_logger = logging.getLogger("uvicorn")
+SANDBOX_LOGGER = logging.getLogger("sandbox")
 
+def define_sandbox_logger(logger: logging.Logger):
+    global SANDBOX_LOGGER
+    SANDBOX_LOGGER = logger
 
 # Dockerボリュームの管理クラス
 class Volume:
@@ -45,14 +46,14 @@ class Volume:
         err = ""
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to create volume: {e}"
 
         if err != "":
             return Volume(""), Error(err)
 
-        test_logger.info(f"volumeName: {volumeName}")
+        SANDBOX_LOGGER.debug(f"volumeName: {volumeName}")
         return Volume(volumeName), Error("")
 
     def remove(self) -> Error:
@@ -62,7 +63,7 @@ class Volume:
         err = ""
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to remove volume: {e}"
 
@@ -274,7 +275,7 @@ class ContainerInfo:
         # Dockerコンテナの作成コマンド
         cmd = ["docker"] + args
 
-        test_logger.info(f"docker create command: {cmd}")
+        SANDBOX_LOGGER.debug(f"docker create command: {cmd}")
 
         # Dockerコンテナの作成
         containerID = ""
@@ -285,7 +286,7 @@ class ContainerInfo:
         except subprocess.CalledProcessError as e:
             err = f"Failed to create container: {e}"
 
-        test_logger.info(f'containerID: {containerID}, err: "{err}"')
+        SANDBOX_LOGGER.debug(f'containerID: {containerID}, err: "{err}"')
 
         if err != "":
             return Error(err)
@@ -301,10 +302,10 @@ class ContainerInfo:
 
         err = ""
 
-        test_logger.info(f"remove container command: {cmd}")
+        SANDBOX_LOGGER.debug(f"remove container command: {cmd}")
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to remove container: {e}"
 
@@ -318,10 +319,10 @@ class ContainerInfo:
 
         err = ""
         
-        test_logger.info(f"copy container command: {cmd}")
+        SANDBOX_LOGGER.debug(f"copy container command: {cmd}")
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             err = f"Failed to copy file: {e}"
 
@@ -400,7 +401,7 @@ class TaskMonitor:
                 check=False,
             )
 
-            test_logger.info(f"docker stats: {result.stdout}")
+            SANDBOX_LOGGER.debug(f"docker stats: {result.stdout}")
 
             # result.stdout = "1.23GiB / 2.00GiB"といった形式でメモリ使用量が取得できる
             # この値をパースしてmaxUsedMemoryを更新する
@@ -509,7 +510,7 @@ class TaskInfo:
         )
 
         # Dockerコンテナの作成
-        test_logger.info(
+        SANDBOX_LOGGER.debug(
             f'containerID: {containerInfo.containerID}, err: "{err.message}"'
         )
 
@@ -536,7 +537,7 @@ class TaskInfo:
         # Dockerコンテナの起動コマンド
         cmd = ["docker"] + args
 
-        test_logger.info(f"docker start command: {cmd}")
+        SANDBOX_LOGGER.debug(f"docker start command: {cmd}")
 
         # self.timeout + 500msの制限時間を設定
         timeout = 30.0  # デフォルトは30秒
@@ -564,11 +565,12 @@ class TaskInfo:
 
             # まだ実行中の場合があるので、docker stop...で停止させる。
             stop_cmd = ["docker", "stop", containerInfo.containerID]
-            test_logger.info(stop_cmd)
-            resultForStop = subprocess.run(stop_cmd, check=False)
+            SANDBOX_LOGGER.debug(stop_cmd)
+            resultForStop = subprocess.run(stop_cmd, check=False, capture_output=True)
             if resultForStop.returncode != 0:
                 message = f"failed to stop docker: {containerInfo.containerID}"
-                test_logger.info(message)
+                SANDBOX_LOGGER.error(message)
+                SANDBOX_LOGGER.debug(message)
                 return TaskResult(
                     TLE=True,
                     timeMS=int(self.taskMonitor.get_elapsed_time_ms()),
@@ -592,7 +594,7 @@ class TaskInfo:
                 memoryByte=self.taskMonitor.get_used_memory_byte(),
             ), Error("")
 
-        test_logger.info(ProcessResult)
+        SANDBOX_LOGGER.debug(ProcessResult)
 
         # モニターを終了
         self.taskMonitor.end()
@@ -624,15 +626,15 @@ class TaskInfo:
         # コンテナ作成から起動までの処理を行う
         # 途中で失敗したら、作成したコンテナの削除を行い、エラーを返す
         containerInfo, err = self.__create()
-        test_logger.info(
+        SANDBOX_LOGGER.debug(
             f'containerID: {containerInfo.containerID}, err: "{err.message}"'
         )
         if err.message != "":
             # コンテナの作成に失敗した場合
             return TaskResult(), err
-        test_logger.info(f"containerID: {containerInfo.containerID}")
+        SANDBOX_LOGGER.debug(f"containerID: {containerInfo.containerID}")
 
-        test_logger.info("start container")
+        SANDBOX_LOGGER.debug("start container")
         result, err = self.__start(containerInfo)
 
         # コンテナの削除
@@ -650,7 +652,7 @@ def inspectExitCode(containerId: str) -> tuple[int, Error]:
 
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
-    test_logger.info(f"inspect exit code: {result}")
+    SANDBOX_LOGGER.debug(f"inspect exit code: {result}")
 
     err = ""
     if result.returncode != 0:

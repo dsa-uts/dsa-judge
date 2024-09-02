@@ -16,8 +16,7 @@ import os
 from enum import Enum
 
 # ロガーの設定
-logging.basicConfig(level=logging.INFO)
-test_logger = logging.getLogger("uvicorn")
+from log.config import judge_logger
 
 load_dotenv()
 
@@ -91,7 +90,7 @@ class JudgeInfo:
         else:
             self.problem_record = problem_record
         
-        test_logger.info(f"JudgeInfo.__init__: problem_record: {self.problem_record}")
+        judge_logger.debug(f"JudgeInfo.__init__: problem_record: {self.problem_record}")
 
         # Get required file names
         self.required_files = fetch_required_files(
@@ -101,7 +100,7 @@ class JudgeInfo:
             for_evaluation=self.submission_record.for_evaluation,
         )
         
-        test_logger.info(f"JudgeInfo.__init__: required_files: {self.required_files}")
+        judge_logger.debug(f"JudgeInfo.__init__: required_files: {self.required_files}")
 
         # Get arranged filepaths
         self.arranged_filepaths = [
@@ -114,7 +113,7 @@ class JudgeInfo:
             )
         ]
         
-        test_logger.info(f"JudgeInfo.__init__: required_files: {self.required_files}")
+        judge_logger.debug(f"JudgeInfo.__init__: required_files: {self.required_files}")
 
         # Get uploaded filepaths
         self.uploaded_filepaths = [
@@ -122,7 +121,7 @@ class JudgeInfo:
             for filepath in fetch_uploaded_filepaths(db=db, submission_id=self.submission_record.id)
         ]
         
-        test_logger.info(f"JudgeInfo.__init__: uploaded_filepaths: {self.uploaded_filepaths}")
+        judge_logger.debug(f"JudgeInfo.__init__: uploaded_filepaths: {self.uploaded_filepaths}")
 
         # Get testcases info
         testcases = fetch_testcases(
@@ -371,7 +370,7 @@ class JudgeInfo:
         # ボリュームを削除
         err = working_volume.remove()
         if not err.silence():
-            test_logger.info(f"failed to remove volume: {working_volume.name}")
+            judge_logger.error(f"failed to remove volume: {working_volume.name}")
         
         # ジャッジ結果を登録
         db = SessionLocal()

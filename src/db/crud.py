@@ -7,8 +7,11 @@ from datetime import datetime
 from . import models
 
 import logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("uvicorn")
+CRUD_LOGGER = logging.getLogger("crud")
+
+def define_crud_logger(logger: logging.Logger):
+    global CRUD_LOGGER
+    CRUD_LOGGER = logger
 
 #----------------------- for judge server --------------------------------------
 from enum import Enum
@@ -48,7 +51,7 @@ class SubmissionRecord:
 # Submissionテーブルから、statusが"queued"のジャッジリクエストを数件取得し、statusを"running"
 # に変え、変更したリクエスト(複数)を返す
 def fetch_queued_judge_and_change_status_to_running(db: Session, n: int) -> list[SubmissionRecord]:
-    logger.info("fetch_queued_judgeが呼び出されました")
+    CRUD_LOGGER.debug("fetch_queued_judgeが呼び出されました")
     try:
         # FOR UPDATE NOWAITを使用して排他的にロックを取得
         submission_list = db.query(models.Submission).filter(models.Submission.progress == 'queued').with_for_update(nowait=True).limit(n).all()
@@ -75,7 +78,7 @@ def fetch_queued_judge_and_change_status_to_running(db: Session, n: int) -> list
         ]
     except Exception as e:
         db.rollback()
-        logger.error(f"fetch_queued_judgeでエラーが発生しました: {str(e)}")
+        CRUD_LOGGER.error(f"fetch_queued_judgeでエラーが発生しました: {str(e)}")
         return []
 
 @dataclass
@@ -92,7 +95,7 @@ class ProblemRecord:
 
 # lecture_id, assignment_id, for_evaluationのデータから、それに対応するProblemデータ(実行ファイル名、制限リソース量)を取得する
 def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> ProblemRecord | None:
-    logger.info("call fetch_problem")
+    CRUD_LOGGER.debug("call fetch_problem")
     problem = db.query(models.Problem).filter(models.Problem.lecture_id == lecture_id,
                                               models.Problem.assignment_id == assignment_id,
                                               models.Problem.for_evaluation == for_evaluation
@@ -116,13 +119,13 @@ def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluati
 # ジャッジリクエストに紐づいている、アップロードされたファイルのパスのリストをUploadedFiles
 # テーブルから取得して返す
 def fetch_uploaded_filepaths(db: Session, submission_id: int) -> list[str]:
-    logger.info("call fetch_uploaded_filepaths")
+    CRUD_LOGGER.debug("call fetch_uploaded_filepaths")
     uploaded_files = db.query(models.UploadedFiles).filter(models.UploadedFiles.submission_id == submission_id).all()
     return [file.path for file in uploaded_files]
 
 # 特定の問題でこちらで用意しているファイルのパス(複数)をArrangedFilesテーブルから取得する
 def fetch_arranged_filepaths(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> list[str]:
-    logger.info("call fetch_arranged_filepaths")
+    CRUD_LOGGER.debug("call fetch_arranged_filepaths")
     arranged_files = db.query(models.ArrangedFiles).filter(
         models.ArrangedFiles.lecture_id == lecture_id,
         models.ArrangedFiles.assignment_id == assignment_id,
@@ -132,7 +135,7 @@ def fetch_arranged_filepaths(db: Session, lecture_id: int, assignment_id: int, f
 
 # 特定の問題で必要とされているのファイル名のリストをRequiredFilesテーブルから取得する
 def fetch_required_files(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> list[str]:
-    logger.info("call fetch_required_files")
+    CRUD_LOGGER.debug("call fetch_required_files")
     required_files = db.query(models.RequiredFiles).filter(
         models.RequiredFiles.lecture_id == lecture_id,
         models.RequiredFiles.assignment_id == assignment_id,
@@ -163,7 +166,7 @@ class TestCaseRecord:
 
 # 特定の問題に紐づいたテストケースのリストをTestCasesテーブルから取得する
 def fetch_testcases(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> list[TestCaseRecord]:
-    logger.info("call fetch_testcases")
+    CRUD_LOGGER.debug("call fetch_testcases")
     testcase_list = db.query(models.TestCases).filter(
         models.TestCases.lecture_id == lecture_id,
         models.TestCases.assignment_id == assignment_id,
@@ -213,7 +216,7 @@ class JudgeResultRecord:
 
 # 特定のテストケースに対するジャッジ結果をJudgeResultテーブルに登録する
 def register_judge_result(db: Session, result: JudgeResultRecord) -> None:
-    logger.info("call register_judge_result")
+    CRUD_LOGGER.debug("call register_judge_result")
     judge_result = models.JudgeResult(
         submission_id=result.submission_id,
         testcase_id=result.testcase_id,
@@ -230,7 +233,7 @@ def register_judge_result(db: Session, result: JudgeResultRecord) -> None:
 # 特定のSubmissionに対応するジャッジリクエストの属性値を変更する
 # 注) SubmissionRecord.idが同じレコードがテーブル内にあること
 def update_submission_record(db: Session, submission_record: SubmissionRecord) -> None:
-    logger.info("call update_submission_status")
+    CRUD_LOGGER.debug("call update_submission_status")
     raw_submission_record = db.query(models.Submission).filter(models.Submission.id == submission_record.id).first()
     if raw_submission_record is None:
         raise ValueError(f"Submission with id {submission_record.id} not found")
@@ -250,7 +253,7 @@ def update_submission_record(db: Session, submission_record: SubmissionRecord) -
 #    全て"queued"に変更する
 # 2. 変更したジャッジリクエストについて、それに紐づいたJudgeResultを全て削除する
 def undo_running_submissions(db: Session) -> None:
-    logger.info("call undo_running_submissions")
+    CRUD_LOGGER.debug("call undo_running_submissions")
     # 1. "running"状態のSubmissionを全て取得
     running_submissions = db.query(models.Submission).filter(models.Submission.progress == "running").all()
     
@@ -273,7 +276,7 @@ def undo_running_submissions(db: Session) -> None:
 
 # Submissionテーブルにジャッジリクエストを追加する
 def register_judge_request(db: Session, batch_id: int | None, student_id: str, lecture_id: int, assignment_id: int, for_evaluation: bool) -> SubmissionRecord:
-    logger.info("call register_judge_request")
+    CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
         batch_id=batch_id,
         student_id=student_id,
@@ -301,7 +304,7 @@ def register_judge_request(db: Session, batch_id: int | None, student_id: str, l
 
 # アップロードされたファイルをUploadedFilesに登録する
 def register_uploaded_files(db: Session, submission_id: int, path: Path) -> None:
-    logger.info("call register_uploaded_files")
+    CRUD_LOGGER.debug("call register_uploaded_files")
     new_uploadedfiles = models.UploadedFiles(
         submission_id=submission_id,
         path=str(path)
@@ -312,7 +315,7 @@ def register_uploaded_files(db: Session, submission_id: int, path: Path) -> None
 # Submissionテーブルのジャッジリクエストをキューに追加する
 # 具体的にはSubmissionレコードのstatusをqueuedに変更する
 def enqueue_judge_request(db: Session, submission_id: int) -> None:
-    logger.info("call enqueue_judge_request")
+    CRUD_LOGGER.debug("call enqueue_judge_request")
     pending_submission = db.query(models.Submission).filter(models.Submission.id == submission_id).first()
     
     if pending_submission is not None:
@@ -323,7 +326,7 @@ def enqueue_judge_request(db: Session, submission_id: int) -> None:
 
 # Submissionテーブルのジャッジリクエストのstatusを確認する
 def fetch_judge_status(db: Session, submission_id: int) -> SubmissionProgressStatus:
-    logger.info("call fetch_judge_status")
+    CRUD_LOGGER.debug("call fetch_judge_status")
     submission = db.query(models.Submission).filter(models.Submission.id == submission_id).first()
     if submission is None:
         raise ValueError(f"Submission with {submission_id} not found")
@@ -331,7 +334,7 @@ def fetch_judge_status(db: Session, submission_id: int) -> SubmissionProgressSta
 
 # 特定のジャッジリクエストに紐づいたジャッジ結果を取得する
 def fetch_judge_results(db: Session, submission_id: int) -> list[JudgeResultRecord]:
-    logger.info("call fetch_judge_result")
+    CRUD_LOGGER.debug("call fetch_judge_result")
     raw_judge_results = db.query(models.JudgeResult).filter(models.JudgeResult.submission_id == submission_id).all()
     return [
         JudgeResultRecord(
