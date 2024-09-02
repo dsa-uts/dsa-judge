@@ -563,8 +563,8 @@ class TaskInfo:
             # モニターを終了(これをしないとtaskMonitorのスレッドが終了しない)
             self.taskMonitor.end()
 
-            # まだ実行中の場合があるので、docker stop...で停止させる。
-            stop_cmd = ["docker", "stop", containerInfo.containerID]
+            # まだ実行中の場合があるので、docker kill...で停止させる。
+            stop_cmd = ["docker", "kill", containerInfo.containerID]
             SANDBOX_LOGGER.debug(stop_cmd)
             resultForStop = subprocess.run(stop_cmd, check=False, capture_output=True)
             if resultForStop.returncode != 0:
