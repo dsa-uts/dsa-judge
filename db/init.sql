@@ -101,7 +101,7 @@ CREATE TABLE EvaluationItems (
     score INT NOT NULL, -- 評価点
     type ENUM('Built', 'Judge') NOT NULL, -- 採点するタイミング
     arranged_files_id VARCHAR(255), -- 紐づいているソースコードのID, NULLABLE
-    message_on_fail VARCHAR(255) NOT NULL, -- 失敗した場合のメッセージ(一行、10文字程度)
+    message_on_fail VARCHAR(255), -- 失敗した場合のメッセージ(一行、10文字程度)
     FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation),
     FOREIGN KEY (arranged_files_id) REFERENCES ArrangedFiles(str_id)
 );
@@ -119,13 +119,13 @@ INSERT INTO EvaluationItems
 -- TestCasesテーブルの作成
 CREATE TABLE IF NOT EXISTS TestCases (
     id INT AUTO_INCREMENT PRIMARY KEY, -- テストケースのID(auto increment)
-    evaluation_items_id VARCHAR(255) NOT NULL, -- 対応する評価項目のID
+    eval_id VARCHAR(255) NOT NULL, -- 対応する評価項目のID
     description TEXT, -- 簡単な1行の説明
     command VARCHAR(255) NOT NULL, -- e.g., "./run.sh", "ls", ...
     argument_path VARCHAR(255), -- スクリプトもしくは実行バイナリに渡す引数が記されたファイルのパス
     stdin_path VARCHAR(255), -- 標準入力のパス, path/to/stdin.txt
-    stdout_path VARCHAR(255) NOT NULL, -- 想定される標準出力のパス, path/to/stdout.txt
-    stderr_path VARCHAR(255) NOT NULL, -- 想定される標準エラー出力のパス, path/to/stderr.txt
+    stdout_path VARCHAR(255), -- 想定される標準出力のパス, path/to/stdout.txt
+    stderr_path VARCHAR(255), -- 想定される標準エラー出力のパス, path/to/stderr.txt
     exit_code INT NOT NULL DEFAULT 0, -- 想定される戻り値
     FOREIGN KEY (evaluation_items_id) REFERENCES EvaluationItems(str_id)
 );
@@ -148,12 +148,12 @@ CREATE TABLE Users (
     username VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
     hashed_password VARCHAR(255) NOT NULL,
-    is_admin BOOLEAN NOT NULL,
-    disabled BOOLEAN NOT NULL,
+    is_admin BOOLEAN DEFAULT false,
+    disabled BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    active_start_date TIMESTAMP,
-    active_end_date TIMESTAMP
+    active_start_date TIMESTAMP NULL,
+    active_end_date TIMESTAMP NULL
 );
 
 -- Usersテーブルに初期データを挿入
@@ -199,8 +199,8 @@ CREATE TABLE IF NOT EXISTS JudgeResult (
     ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- ジャッジ結果が出た時刻
     submission_id INT, -- ジャッジ結果に紐づいているジャッジリクエストのID
     testcase_id INT, -- ジャッジ結果に紐づいているテストケースのID
-    timeMS INT NOT NULL, -- 実行時間[ms]
     result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE') NOT NULL, -- 実行結果のステータス、 AC/WA/TLE/MLE/CE/RE/OLE/IE, 参考: https://atcoder.jp/contests/abc367/glossary
+    timeMS INT NOT NULL, -- 実行時間[ms]
     memoryKB INT NOT NULL, -- 消費メモリ[KB]
     exit_code INT NOT NULL, -- 戻り値
     stdout TEXT NOT NULL, -- 標準出力

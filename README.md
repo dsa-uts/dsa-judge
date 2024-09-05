@@ -59,7 +59,7 @@ erDiagram
 	}
 	TestCases {
 		Int id PK "テストケースのID(auto increment)"
-		Int evaluation_items_id FK "紐づいている評価項目のID"
+		Int eval_id FK "紐づいている評価項目のID"
 		String description "簡単な一行の説明"
 		String command "e.g., './run.sh', 'ls', ..."
 		String argument_path  "スクリプト/executableの引数のファイルパス"
