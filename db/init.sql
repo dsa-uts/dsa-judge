@@ -144,8 +144,7 @@ INSERT INTO TestCases
 
 -- Users テーブル
 CREATE TABLE Users (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    student_id INT,
+    user_id VARCHAR(255) PRIMARY KEY,
     username VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
     hashed_password VARCHAR(255) NOT NULL,
@@ -159,15 +158,15 @@ CREATE TABLE Users (
 
 -- Usersテーブルに初期データを挿入
 INSERT INTO Users 
-(student_id , username         , email                           , hashed_password, is_admin, disabled, active_start_date    , active_end_date      ) VALUES
-(202420659  , "TakuyaMizokami" , "mizokami@kde.cs.tsukuba.ac.jp" , "hogehoge"     , true    , false   , "2023-11-01 00:00:00", "2025-12-31 23:59:59");
+(user_id      , username         , email                           , hashed_password, is_admin, disabled, active_start_date    , active_end_date      ) VALUES
+("202420659"  , "TakuyaMizokami" , "mizokami@kde.cs.tsukuba.ac.jp" , "hogehoge"     , true    , false   , "2023-11-01 00:00:00", "2025-12-31 23:59:59");
 
 -- BatchSubmissionテーブルの作成
 CREATE TABLE IF NOT EXISTS BatchSubmission (
     id INT AUTO_INCREMENT PRIMARY KEY, -- バッチ採点のID(auto increment)
     ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- バッチ採点のリクエスト時刻
-    user_id INT NOT NULL, -- リクエストした管理者のID
-    FOREIGN KEY (user_id) REFERENCES Users(id)
+    user_id VARCHAR(255) NOT NULL, -- リクエストした管理者のID
+    FOREIGN KEY (user_id) REFERENCES Users(user_id)
 );
 
 -- Submissionテーブルの作成
@@ -181,7 +180,7 @@ CREATE TABLE IF NOT EXISTS Submission (
     for_evaluation BOOLEAN NOT NULL, -- 課題採点用かどうか, True/False
     progress ENUM('pending', 'queued', 'running', 'done') DEFAULT 'pending', -- リクエストの処理状況, pending/queued/running/done
     FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
-    FOREIGN KEY (user_id) REFERENCES Users(id),
+    FOREIGN KEY (user_id) REFERENCES Users(user_id),
     FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation)
 );
 
@@ -201,11 +200,57 @@ CREATE TABLE IF NOT EXISTS JudgeResult (
     submission_id INT, -- ジャッジ結果に紐づいているジャッジリクエストのID
     testcase_id INT, -- ジャッジ結果に紐づいているテストケースのID
     timeMS INT NOT NULL, -- 実行時間[ms]
-    result ENUM('AC', 'WA', 'TLE', 'MLE', 'CE', 'RE', 'OLE', 'IE') NOT NULL, -- 実行結果のステータス、 AC/WA/TLE/MLE/CE/RE/OLE/IE, 参考: https://atcoder.jp/contests/abc367/glossary
+    result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE') NOT NULL, -- 実行結果のステータス、 AC/WA/TLE/MLE/CE/RE/OLE/IE, 参考: https://atcoder.jp/contests/abc367/glossary
     memoryKB INT NOT NULL, -- 消費メモリ[KB]
     exit_code INT NOT NULL, -- 戻り値
     stdout TEXT NOT NULL, -- 標準出力
     stderr TEXT NOT NULL, -- 標準エラー出力
     FOREIGN KEY (submission_id) REFERENCES Submission(id),
     FOREIGN KEY (testcase_id) REFERENCES TestCases(id)
+);
+
+-- EvaluationSummary(一つの提出における、各評価項目の採点結果)
+CREATE TABLE IF NOT EXISTS EvaluationSummary (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    submission_id INT, -- 対象のSubmissionリクエストのID
+    batch_id INT, -- Submissionリクエストに紐づいたBatchリクエストのID
+    user_id VARCHAR(255), -- 採点対象のユーザのID
+    lecture_id INT NOT NULL, -- 何回目の授業で出される課題か, e.g., 1, 2, ...
+    assignment_id INT NOT NULL, -- 何番目の課題か, e.g., 1, 2, ...
+    for_evaluation BOOLEAN NOT NULL, -- 課題採点用かどうか, True/False
+    eval_id VARCHAR(255) NOT NULL, -- 評価項目の文字列ID
+    eval_title VARCHAR(255) NOT NULL, -- 評価項目の題目 
+    eval_description VARCHAR(255), -- 評価項目の説明
+    eval_type ENUM('Built', 'Judge') NOT NULL, -- 評価項目の実行タイミング
+    arranged_files_id VARCHAR(255), -- 紐づいているソースコードのID
+    /* Aggregation attribltes over JudgeResult */
+    result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE') NOT NULL, -- 評価項目に含まれる全TestCaseの実行結果
+    message VARCHAR(255), -- メッセージ(5文字～10文字程度)
+    detail VARCHAR(255), -- 詳細 (ファイルが足りない場合: "main.c func.c....", 実行ファイルが足りない場合: "main, func,...")
+    score INT, -- 集計結果 (ACの場合、EvaluationItems.scoreの値、それ以外は0点)
+    FOREIGN KEY (submission_id) REFERENCES Submission(id),
+    FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
+    FOREIGN KEY (user_id) REFERENCES Users(user_id),
+    FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation),
+    FOREIGN KEY (eval_id) REFERENCES EvaluationItems(str_id),
+    FOREIGN KEY (arranged_files_id) REFERENCES ArrangedFiles(str_id)
+);
+
+-- SubmissionSummary(一つの提出における、全体の採点結果)
+CREATE TABLE IF NOT EXISTS SubmissionSummary (
+    submission_id INT PRIMARY KEY, -- 対象のSubmissionリクエストのID
+    batch_id INT, -- Submissionリクエストに紐づいたBatchリクエストのID
+    user_id VARCHAR(255), -- 採点対象のユーザのID
+    lecture_id INT NOT NULL, -- 何回目の授業で出される課題か, e.g., 1, 2, ...
+    assignment_id INT NOT NULL, -- 何番目の課題か, e.g., 1, 2, ...
+    for_evaluation BOOLEAN NOT NULL, -- 課題採点用かどうか, True/False
+    /* Aggregation attributes over SubmissionSummary */
+    result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE', 'FN') NOT NULL, -- Submissionリクエスト全体の実行結果, FN(File Not Found)
+    message VARCHAR(255), -- メッセージ(5文字～10文字程度)
+    detail VARCHAR(255), -- 詳細(ファイルが足りない場合: "main.c func.c....", 実行ファイルが足りない場合: "main, func,...")
+    score INT, -- 集計スコア (該当Submissionリクエストの全scoreの合計)
+    FOREIGN KEY (submission_id) REFERENCES Submission(id),
+    FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
+    FOREIGN KEY (user_id) REFERENCES Users(user_id),
+    FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation)
 );

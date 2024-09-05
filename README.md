@@ -77,8 +77,7 @@ erDiagram
 	EvaluationItems ||--|{ TestCases : "has many test cases"
 
 	Users {
-		Int id PK "ユーザID(auto increment)"
-		Int student_id "学籍番号(あるなら)"
+		String user_id PK "ユーザID"
 		String username "ユーザ名"
 		String email "メールアドレス"
 		String hashed_password ""
@@ -117,11 +116,43 @@ erDiagram
 		Int testcase_id FK "ジャッジ結果に紐づいているテストケースのID"
 		Int timeMS "実行時間[ms]"
 		Int memoryKB "消費メモリ[KB]"
-		Enum result "実行結果のステータス、 AC/WA/TLE/MLE/RE/OLE/IE"
+		Enum result "実行結果のステータス、 AC/WA/TLE/MLE/RE/CE/OLE/IE"
 		String stdout "標準出力"
 		String stderr "標準エラー出力"
 		Int exit_code "戻り値"
 	}
+	EvaluationSummary {
+		Int id PK "挿入ID"
+		Int submission_id FK "対象のSubmissionリクエストのID"
+		Int batch_id FK "Submissionリクエストに紐づいたBatchリクエストのID"
+		String user_id FK "採点対象のユーザID"
+		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
+		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
+		Boolean for_evaluation FK "課題採点用かどうか, True/False"
+		String eval_id FK "評価項目の文字列ID"
+		String eval_title "評価項目の題目"
+		String eval_description "評価項目の説明"
+		Enum eval_type "評価項目の実行タイミング, Built/Judge"
+		String arranged_files_id FK "評価項目に紐づいているソースコードのID"
+		Enum result "評価項目に含まれる全TestCaseの実行結果"
+		String message "メッセージ(5文字～10文字程度)"
+		String detail "詳細"
+		Int score "集計結果"
+	}
+
+	SubmissionSummary {
+		Int submission_id PK "対象のSubmissionリクエストのID"
+		Int batch_id FK "Submissionリクエストに紐づいたBatchリクエストのID"
+		String user_id FK "採点対象のユーザID"
+		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
+		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
+		Boolean for_evaluation FK "課題採点用かどうか, True/False"
+		Enum result "評価項目に含まれる全TestCaseの実行結果"
+		String message "メッセージ(5文字～10文字程度)"
+		String detail "詳細"
+		Int score "集計結果"
+	}
+
 	Users ||--|{ BatchSubmission : "has many batch submissions"
 	Users ||--|{ Submission : "has many single submissions"
 	BatchSubmission ||--|{ Submission : "is composed of single submissions"
