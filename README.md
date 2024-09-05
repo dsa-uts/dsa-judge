@@ -23,15 +23,13 @@ erDiagram
 		String description_path "課題の説明文のファイルパス"
 		Int timeMS "ジャッジの制限時間[ms] e.g., 1000"
 		Int memoryMB "ジャッジの制限メモリ[MB] e.g., 1024"
-		String build_script_path "ビルドする際に用いるスクリプトファイルのパス"
-		String executable "最終的に得られる実行バイナリ名 e.g., main"
 	}
 	ArrangedFiles {
 		Int id PK "ソースコードのID(auto increment)"
 		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
 		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
 		Boolean for_evaluation FK "課題採点用かどうか, True/False"
-		String path "ソースコードのパス(Makefileも全部含める)"
+		String path "ファイルのパス(Makefileも全部含める)"
 	}
 	RequiredFiles {
 		Int id PK "ソースコードのID(auto increment)"
@@ -40,15 +38,23 @@ erDiagram
 		Boolean for_evaluation FK "課題採点用かどうか, True/False"
 		String name "ファイル名(Makefileも全部含める)"
 	}
-	TestCases {
-		Int id PK "テストケースのID(auto increment)"
+	EvaluationItems {
+		Int id PK "評価項目のID(auto increment)"
 		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
 		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
 		Boolean for_evaluation FK "課題採点用かどうか, True/False"
-		Enum type "テストケースが実行されるタイミング, preBuilt/postBuilt/Judge"
-		String description "どの部分点に相当するかの説明"
-		Int score "配点"
-		String command "e.g., './run.sh', 'ls', ... NULLなら'./<executable>'になる"
+		String title "e.g., func1"
+		String description "説明"
+		Int score "評価点"
+		Enum type "preBuilt, Built, postBuilt, Judge"
+		Int arranged_files_id FK "紐づいているソースコードのID, NULLABLE"
+		String message_on_fail "失敗した場合のメッセージ(一行、10文字程度)"
+	}
+	TestCases {
+		Int id PK "テストケースのID(auto increment)"
+		Int evaluation_items_id FK "紐づいている評価項目のID"
+		String description "簡単な一行の説明"
+		String command "e.g., './run.sh', 'ls', ..."
 		String argument_path  "スクリプト/executableの引数のファイルパス"
 		String stdin_path "標準入力のパス, path/to/stdin.txt"
 		String stdout_path "想定される標準出力のパス, path/to/stdout.txt"
@@ -58,34 +64,37 @@ erDiagram
 	Lecture ||--|{ Problem : "has many problems"
 	Problem ||--|{ RequiredFiles : "has many required files"
 	Problem ||--|{ ArrangedFiles : "has many arranged files"
-	Problem ||--|{ TestCases : "has many test cases"
+	Problem ||--|{ EvaluationItems : "has many evaluation items"
+	ArrangedFiles o|--|{ EvaluationItems : "has associated arranged files or none"
+	EvaluationItems ||--|{ TestCases : "has many test cases"
 
-	AdminUser {
-		String id PK "ユーザID e.g., zakki"
-		String name "ユーザ名 e.g., 山崎"
-	}
-	Student {
-		String id PK "学籍番号 e.g., s2200342"
-		String name "ユーザ名 e.g., 岡本"
+	Users {
+		Int id PK "ユーザID(auto increment)"
+		Int student_id "学籍番号(あるなら)"
+		String username "ユーザ名"
+		String email "メールアドレス"
+		String hashed_password ""
+		Boolean is_admin ""
+		Boolean disabled
+		TimeStamp created_at
+		TimeStamp updated_at
+		TimeStamp active_start_date
+		TimeStamp active_end_date
 	}
 	BatchSubmission {
 		Int id PK "バッチ採点のID(auto increment)"
 		TimeStamp ts "バッチ採点のリクエスト時刻"
-		String user_id FK "リクエストした管理者のID"
+		Int user_id FK "リクエストした管理者のID"
 	}
 	Submission {
 		Int id PK "提出されたジャッジリクエストのID(auto increment)"
 		TimeStamp ts "リクエストされた時刻"
 		Int batch_id FK "ジャッジリクエストが属しているバッチリクエストのID, 学生のフォーマットチェック提出ならNULL"
-		String student_id FK "採点対象の学生の学籍番号"
+		String user_id FK "採点対象のユーザのID"
 		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
 		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
 		Boolean for_evaluation FK "課題採点用かどうか, True/False"
 		Enum progress "リクエストの処理状況, pending/queued/running/done"
-		Enum prebuilt_result "コンパイル前のチェック結果, nullable"
-		Enum postbuilt_result "コンパイル後のチェック結果, nullable"
-		Enum judge_result "ジャッジ結果, nullable"
-		String message "エラーメッセージ(あれば)"
 	}
 	UploadedFiles {
 		Int id PK "アップロードされたファイルのID(auto increment)"
@@ -100,17 +109,17 @@ erDiagram
 		Int testcase_id FK "ジャッジ結果に紐づいているテストケースのID"
 		Int timeMS "実行時間[ms]"
 		Int memoryKB "消費メモリ[KB]"
-		Enum result "実行結果のステータス、 AC/WA/TLE/MLE/CE/RE/OLE/IE"
+		Enum result "実行結果のステータス、 AC/WA/TLE/MLE/RE/OLE/IE"
 		String stdout "標準出力"
 		String stderr "標準エラー出力"
 		Int exit_code "戻り値"
 	}
-	AdminUser ||--|{ BatchSubmission : "has many batch judges"
-	Student ||--|{ Submission : "has many format check requests"
-	BatchSubmission ||--|{ Submission : "is composed of single judges"
-	Problem ||--|{ Submission : "has many request judges"
-	Submission ||--o{ JudgeResult : "has many judge result or none"
-	TestCases ||--o{ JudgeResult : "has many associated judge result or none"
+	Users ||--|{ BatchSubmission : "has many batch submissions"
+	Users ||--|{ Submission : "has many single submissions"
+	BatchSubmission ||--|{ Submission : "is composed of single submissions"
+	Problem ||--|{ Submission : "has many requested submissions"
+	Submission ||--o{ JudgeResult : "has many judge results or none"
+	TestCases ||--o{ JudgeResult : "has many associated judge results or none"
 	Submission ||--|{ UploadedFiles : "has many associated uploaded files"
 ```
 
