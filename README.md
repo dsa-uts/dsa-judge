@@ -24,6 +24,13 @@ erDiagram
 		Int timeMS "ジャッジの制限時間[ms] e.g., 1000"
 		Int memoryMB "ジャッジの制限メモリ[MB] e.g., 1024"
 	}
+	Executables {
+		Int id PK "ID(auto increment)"
+		Int lecture_id PK "Lecture.idからの外部キー"
+		Int assignment_id PK "何番目の課題か, e.g., 1, 2, ..."
+		Boolean for_evaluation PK "課題採点用かどうか, True/False"
+		String name "実行ファイル名"
+	}
 	ArrangedFiles {
 		Int id PK "ソースコードのID(auto increment)"
 		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
@@ -46,7 +53,7 @@ erDiagram
 		String title "e.g., func1"
 		String description "説明"
 		Int score "評価点"
-		Enum type "preBuilt, Built, postBuilt, Judge"
+		Enum type "Built, Judge"
 		Int arranged_files_id FK "紐づいているソースコードのID, NULLABLE"
 		String message_on_fail "失敗した場合のメッセージ(一行、10文字程度)"
 	}
@@ -64,6 +71,7 @@ erDiagram
 	Lecture ||--|{ Problem : "has many problems"
 	Problem ||--|{ RequiredFiles : "has many required files"
 	Problem ||--|{ ArrangedFiles : "has many arranged files"
+	Problem ||--|{ Executables : "has many executables"
 	Problem ||--|{ EvaluationItems : "has many evaluation items"
 	ArrangedFiles o|--|{ EvaluationItems : "has associated arranged files or none"
 	EvaluationItems ||--|{ TestCases : "has many test cases"

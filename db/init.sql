@@ -34,6 +34,23 @@ INSERT INTO Problem (lecture_id, assignment_id, for_evaluation, title, descripti
 (1, 1, true , "基本課題", "ex1-1/description.md", 1000, 1024),
 (1, 2, false, "発展課題", "ex1-2/description.md", 1000, 1024);
 
+-- Executables(実行ファイル名のリスト)の作成
+CREATE TABLE IF NOT EXISTS Executables (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    lecture_id INT,
+    assignment_id INT,
+    for_evaluation INT,
+    name VARCHAR(255) NOT NULL, -- 実行ファイル名
+    FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation)
+);
+
+-- Executablesテーブルに初期データを挿入
+INSERT INTO Executables
+(lecture_id, assignment_id, for_evaluation, name) VALUES
+(1         , 1            , false         , "gcd_euclid"),
+(1         , 2            , false         , "gcd_recursive")
+;
+
 -- ArrangedFilesテーブル(あらかじめこちらで用意したファイルリスト)の作成
 CREATE TABLE IF NOT EXISTS ArrangedFiles (
     str_id VARCHAR(255) PRIMARY KEY, -- 文字列ID(ユニーク)
@@ -48,7 +65,6 @@ CREATE TABLE IF NOT EXISTS ArrangedFiles (
 INSERT INTO ArrangedFiles
 (str_id         , lecture_id, assignment_id, for_evaluation, path) VALUES
 ("1-1-make"     , 1         , 1            , false         , "ex1-1/Makefile"),
-("1-1-filecheck", 1         , 1            , false         , "filecheck.sh"),
 ("1-1-testlink" , 1         , 1            , false         , "ex1-1/test_link.c")
 ;
 
@@ -83,7 +99,7 @@ CREATE TABLE EvaluationItems (
     title VARCHAR(255) NOT NULL, -- e.g., func1
     description TEXT, -- 説明
     score INT NOT NULL, -- 評価点
-    type ENUM('preBuilt', 'Built', 'postBuilt', 'Judge') NOT NULL, -- 採点するタイミング
+    type ENUM('Built', 'Judge') NOT NULL, -- 採点するタイミング
     arranged_files_id VARCHAR(255), -- 紐づいているソースコードのID, NULLABLE
     message_on_fail VARCHAR(255) NOT NULL, -- 失敗した場合のメッセージ(一行、10文字程度)
     FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation),
@@ -94,7 +110,7 @@ CREATE TABLE EvaluationItems (
 INSERT INTO EvaluationItems
 (str_id         , lecture_id, assignment_id, for_evaluation, title         , description                        , score, type        , arranged_files_id, message_on_fail      ) VALUES
 ("1-1-build"    , 1         , 1            , false         , "compile"     , ""                                 , 0    , "Built"     , "1-1-make"       , "コンパイルに失敗しました"),
-("1-1-postbuild", 1         , 1            , false         , "filecheck"   , ""                                 , 0    , "postBuilt" , "1-1-make"       , "gcd_euclidが定義されていません")
+("1-1-check"    , 1         , 1            , false         , "check"       , ""                                 , 0    , "Built"     , "1-1-make"       , "gcd_euclidが定義されていません")
 ("1-1-small"    , 1         , 1            , false         , "smallNumber" , ""                                 , 0    , "Judge"     , NULL             , "小さい数同士のGCDを求められていません"),
 ("1-1-invalid1" , 1         , 1            , false         , "invalidArg"  , ""                                 , 0    , "Judge"     , NULL             , "引数が多い場合のエラー出力ができていません"),
 ("1-1-invalid2" , 1         , 1            , false         , "negative"    , ""                                 , 0    , "Judge"     , NULL             , "ゼロ以下の整数が与えられた場合のエラー出力ができていません")
@@ -118,8 +134,7 @@ CREATE TABLE IF NOT EXISTS TestCases (
 INSERT INTO TestCases 
 (evaluation_items_id , description                                        , command                      , argument_path                    , stdin_path, stdout_path                     , stderr_path                     , exit_code) VALUES
 ( "1-1-build"        , "コンパイルできるか"                                  , "make gcd_euclid"            , NULL                             , NULL      , NULL                            , NULL                            , 0),
-( "1-1-build"        , "gcd_euclidが定義されているか"                        , "make test_link"             , NULL                             , NULL      , NULL                            , NULL                            , 0),
-( "1-1-check"        , "gcd_euclidが出力されているか"                        , "./filecheck.sh gcd_euclid"  , NULL                             , NULL      , NULL                            , NULL                            , 0),
+( "1-1-check"        , "gcd_euclidが定義されているか"                        , "make test_link"             , NULL                             , NULL      , NULL                            , NULL                            , 0),
 ( "1-1-small"        , "小さい数同士のGCDを求められているか"                    , "./gcd_euclid"               , "ex1-1/testcases/easy1.arg"      , NULL      , "ex1-1/testcases/easy1.out"     , "ex1-1/testcases/easy1.err"     , 0),
 ( "1-1-small"        , "小さい数同士のGCDを求められているか"                    , "./gcd_euclid"               , "ex1-1/testcases/easy2.arg"      , NULL      , "ex1-1/testcases/easy2.out"     , "ex1-1/testcases/easy2.err"     , 0),
 ( "1-1-small"        , "小さい数同士のGCDを求められているか"                    , "./gcd_euclid"               , "ex1-1/testcases/easy3.arg"      , NULL      , "ex1-1/testcases/easy3.out"     , "ex1-1/testcases/easy3.err"     , 0),
