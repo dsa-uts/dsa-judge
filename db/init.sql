@@ -212,22 +212,19 @@ CREATE TABLE IF NOT EXISTS JudgeResult (
 -- EvaluationSummary(一つの提出における、各評価項目の採点結果)
 CREATE TABLE IF NOT EXISTS EvaluationSummary (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    submission_id INT, -- 対象のSubmissionリクエストのID
+    submission_id INT NOT NULL, -- 対象のSubmissionリクエストのID
     batch_id INT, -- Submissionリクエストに紐づいたBatchリクエストのID
     user_id VARCHAR(255), -- 採点対象のユーザのID
     lecture_id INT NOT NULL, -- 何回目の授業で出される課題か, e.g., 1, 2, ...
     assignment_id INT NOT NULL, -- 何番目の課題か, e.g., 1, 2, ...
     for_evaluation BOOLEAN NOT NULL, -- 課題採点用かどうか, True/False
     eval_id VARCHAR(255) NOT NULL, -- 評価項目の文字列ID
-    eval_title VARCHAR(255) NOT NULL, -- 評価項目の題目 
-    eval_description VARCHAR(255), -- 評価項目の説明
-    eval_type ENUM('Built', 'Judge') NOT NULL, -- 評価項目の実行タイミング
     arranged_files_id VARCHAR(255), -- 紐づいているソースコードのID
     /* Aggregation attribltes over JudgeResult */
     result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE') NOT NULL, -- 評価項目に含まれる全TestCaseの実行結果
     message VARCHAR(255), -- メッセージ(5文字～10文字程度)
     detail VARCHAR(255), -- 詳細 (ファイルが足りない場合: "main.c func.c....", 実行ファイルが足りない場合: "main, func,...")
-    score INT, -- 集計結果 (ACの場合、EvaluationItems.scoreの値、それ以外は0点)
+    score INT NOT NULL, -- 集計結果 (ACの場合、EvaluationItems.scoreの値、それ以外は0点)
     FOREIGN KEY (submission_id) REFERENCES Submission(id),
     FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
     FOREIGN KEY (user_id) REFERENCES Users(user_id),
@@ -248,7 +245,7 @@ CREATE TABLE IF NOT EXISTS SubmissionSummary (
     result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE', 'FN') NOT NULL, -- Submissionリクエスト全体の実行結果, FN(File Not Found)
     message VARCHAR(255), -- メッセージ(5文字～10文字程度)
     detail VARCHAR(255), -- 詳細(ファイルが足りない場合: "main.c func.c....", 実行ファイルが足りない場合: "main, func,...")
-    score INT, -- 集計スコア (該当Submissionリクエストの全scoreの合計)
+    score INT NOT NULL, -- 集計スコア (該当Submissionリクエストの全scoreの合計)
     FOREIGN KEY (submission_id) REFERENCES Submission(id),
     FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
     FOREIGN KEY (user_id) REFERENCES Users(user_id),

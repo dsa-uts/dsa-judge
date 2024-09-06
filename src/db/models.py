@@ -64,7 +64,7 @@ class TestCases(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     eval_id = Column(String(255), ForeignKey('EvaluationItems.str_id'), nullable=False)
     description = Column(String)
-    command = Column(String(255))
+    command = Column(String(255), nullable=False)
     argument_path = Column(String(255))
     stdin_path = Column(String(255))
     stdout_path = Column(String(255))
@@ -124,21 +124,18 @@ class JudgeResult(Base):
 class EvaluationSummary(Base):
     __tablename__ = 'EvaluationSummary'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    submission_id = Column(Integer, ForeignKey('Submission.id'))
+    submission_id = Column(Integer, ForeignKey('Submission.id'), nullable=False)
     batch_id = Column(Integer, ForeignKey('BatchSubmission.id'))
     user_id = Column(String(255), ForeignKey('Users.user_id'), nullable=False)
     lecture_id = Column(Integer, ForeignKey('Problem.lecture_id'), nullable=False)
     assignment_id = Column(Integer, ForeignKey('Problem.assignment_id'), nullable=False)
     for_evaluation = Column(Boolean, ForeignKey('Problem.for_evaluation'), nullable=False)
     eval_id = Column(String(255), ForeignKey('EvaluationItems.str_id'), nullable=False)
-    eval_title = Column(String(255), nullable=False)
-    eval_description = Column(String(255))
-    eval_type = Column(Enum('Built', 'Judge'), nullable=False)
     arranged_files_id = Column(String(255), ForeignKey("ArrangedFiles.str_id"))
     result = Column(Enum('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE'), nullable=False)
     message = Column(String(255)),
     detail = Column(String(255)),
-    score = Column(Integer),
+    score = Column(Integer, nullable=False),
 
 class SubmissionSummary(Base):
     __tablename__ = 'SubmissionSummary'
@@ -151,4 +148,4 @@ class SubmissionSummary(Base):
     result = Column(Enum('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE', 'FN'), nullable=False)
     message = Column(String(255)),
     detail = Column(String(255)),
-    score = Column(Integer),
+    score = Column(Integer, nullable=False),
