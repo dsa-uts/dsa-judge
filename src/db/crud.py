@@ -13,7 +13,7 @@ def define_crud_logger(logger: logging.Logger):
     global CRUD_LOGGER
     CRUD_LOGGER = logger
 
-#----------------------- for judge server --------------------------------------
+# ----------------------- for judge server --------------------------------------
 from enum import Enum
 
 class EnumWithOrder(Enum):
@@ -45,7 +45,7 @@ class SubmissionProgressStatus(Enum):
     QUEUED = 'queued'
     RUNNING = 'running'
     DONE = 'done'
-    
+
 class SingleJudgeStatus(EnumWithOrder):
     # (value) = (order)
     AC  = 0
@@ -56,7 +56,7 @@ class SingleJudgeStatus(EnumWithOrder):
     CE  = 5
     OLE = 6
     IE  = 7
-    
+
 class EvaluationSummaryStatus(EnumWithOrder):
     # (value) = (order)
     AC  = 0
@@ -142,7 +142,7 @@ class EvaluationItemRecord:
     description: str | None
     score: int
     type: EvaluationType
-    arranged_file: str | None
+    arranged_file_id: str | None
     message_on_fail: str | None
     testcase_list: list[TestCaseRecord] # 紐づいているTestCaseRecordのリスト
 
@@ -204,7 +204,7 @@ def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluati
                     description=item.description,
                     score=item.score,
                     type=EvaluationType[item.type],
-                    arranged_file=item.arranged_files_id,
+                    arranged_file_id=item.arranged_file_id,
                     message_on_fail=item.message_on_fail,
                     testcase_list=testcase_list
                 )
@@ -251,7 +251,7 @@ def fetch_required_files(db: Session, lecture_id: int, assignment_id: int, for_e
         models.RequiredFiles.for_evaluation == for_evaluation
     ).all()
     return [file.name for file in required_files]
-    
+
 @dataclass
 class JudgeResultRecord:
     submission_id: int
@@ -288,7 +288,7 @@ def register_judge_result(db: Session, result: JudgeResultRecord) -> None:
     )
     db.add(judge_result)
     db.commit()
-    
+
 # 特定のSubmissionに対応するジャッジリクエストの属性値を変更する
 # 注) SubmissionRecord.idが同じレコードがテーブル内にあること
 def update_submission_record(db: Session, submission_record: SubmissionRecord) -> None:
@@ -313,7 +313,7 @@ class EvaluationSummaryRecord:
     assignment_id: int
     for_evaluation: bool
     eval_id: str
-    arranged_files_id: str | None
+    arranged_file_id: str | None
     result: EvaluationSummaryStatus
     message: str | None
     detail: str | None
@@ -322,6 +322,7 @@ class EvaluationSummaryRecord:
     eval_title: str # EvaluationItems.title
     eval_description: str | None # EvaluationItems.description
     eval_type: EvaluationType # EvaluationItems.type
+    arranged_file_name: str | None
     judge_result_list: list[JudgeResultRecord] = []
 
 # 特定のSubmission,さらにその中の評価項目に対応する結果をEvaluationSummaryテーブルに登録する
@@ -335,7 +336,7 @@ def register_evaluation_summary(db: Session, eval_summary: EvaluationSummaryReco
         assignment_id=eval_summary.assignment_id,
         for_evaluation=eval_summary.for_evaluation,
         eval_id=eval_summary.eval_id,
-        arranged_files_id=eval_summary.arranged_files_id,
+        arranged_file_id=eval_summary.arranged_file_id,
         result=eval_summary.result.name,
         message=eval_summary.message,
         detail=eval_summary.detail,
@@ -360,7 +361,7 @@ class SubmissionSummaryRecord:
     score = int
     # 以降、クライアントで必要になるフィールド
     evaluation_summary_list: list[EvaluationSummaryRecord] = []
-    
+
 
 # 特定のSubmissionに対応するジャッジの集計結果をSubmissionSummaryテーブルに登録する
 def register_submission_summary(db: Session, submission_summary: SubmissionSummaryRecord) -> None:
@@ -439,7 +440,7 @@ def register_uploaded_files(db: Session, submission_id: int, path: Path) -> None
     )
     db.add(new_uploadedfiles)
     db.commit()
-    
+
 # Submissionテーブルのジャッジリクエストをキューに追加する
 # 具体的にはSubmissionレコードのstatusをqueuedに変更する
 def enqueue_judge_request(db: Session, submission_id: int) -> None:
@@ -460,8 +461,6 @@ def fetch_judge_status(db: Session, submission_id: int) -> SubmissionProgressSta
         raise ValueError(f"Submission with {submission_id} not found")
     return SubmissionProgressStatus(submission.progress)
 
-# TODO: SubmissionSummary, EvaluationSummaryをまとめたオブジェクトを取得する関数の実装
-
 # 特定のジャッジリクエストに紐づいたジャッジ結果を取得する
 def fetch_judge_results(db: Session, submission_id: int) -> list[JudgeResultRecord]:
     CRUD_LOGGER.debug("call fetch_judge_result")
@@ -481,3 +480,94 @@ def fetch_judge_results(db: Session, submission_id: int) -> list[JudgeResultReco
         )
         for raw_result in raw_judge_results
     ]
+
+def fetch_arranged_file_dict(db: Session, arranged_file_id_list: list[str]) -> dict[str, str]:
+    arranged_file_records = db.query(models.ArrangedFiles).filter(models.ArrangedFiles.str_id.in_(arranged_file_id_list)).all()
+    return {record.str_id: record.path for record in arranged_file_records}
+
+def fetch_submission_summary(db: Session, submission_id: int) -> SubmissionSummaryRecord:
+    CRUD_LOGGER.debug("fetch_submission_summaryが呼び出されました")
+    raw_submission_summary = db.query(models.SubmissionSummary).filter(
+        models.SubmissionSummary.submission_id == submission_id
+    ).first()
+    if raw_submission_summary is None:
+        raise ValueError(f"提出 {submission_id} は完了していません")
+    submission_summary = SubmissionSummaryRecord(
+        submission_id=raw_submission_summary.submission_id,
+        batch_id=raw_submission_summary.batch_id,
+        user_id=raw_submission_summary.user_id,
+        lecture_id=raw_submission_summary.lecture_id,
+        assignment_id=raw_submission_summary.assignment_id,
+        for_evaluation=raw_submission_summary.for_evaluation,
+        result=SubmissionSummaryStatus[raw_submission_summary.result]
+    )
+
+    # Goal: submission_summary.evaluation_summary_listを埋める
+
+    # 1. fetch_problem()で問題の全情報を取得
+    problem_record = fetch_problem(
+        db=db,
+        lecture_id=submission_summary.lecture_id,
+        assignment_id=submission_summary.assignment_id,
+        for_evaluation=submission_summary.for_evaluation,
+    )
+
+    if problem_record is None:
+        raise ValueError(
+            f"対応する問題情報がありません: 第{submission_summary.lecture_id}回 課題{submission_summary.assignment_id} - {submission_summary.for_evaluation}"
+        )
+
+    # submission_idに対応するJudgeResultを全て取得
+    judge_result_list = fetch_judge_results(
+        db=db, submission_id=submission_summary.submission_id
+    )
+    
+    # testcase_id -> JudgeResulレコードへアクセスする辞書
+    judge_result_dict = {item.testcase_id: item for item in judge_result_list}
+
+    raw_evaluation_summary_list = db.query(models.EvaluationSummary).filter(
+        models.EvaluationSummary.submission_id == submission_id
+    ).all()
+
+    # eval_id -> 対応するEvaluationItemsレコードの情報へアクセスする辞書
+    evaluation_items_dict = {item.str_id: item for item in problem_record.evaluation_item_list}
+    
+    arranged_file_id_list = [item.arranged_file_id for item in problem_record.evaluation_item_list]
+    
+    arranged_files_dict = fetch_arranged_file_dict(
+        db=db, arranged_file_id_list=arranged_file_id_list
+    )
+
+    for raw_evaluation_summary in raw_evaluation_summary_list:
+        evaluation_item = evaluation_items_dict[raw_evaluation_summary.eval_id]
+        evaluation_summary = EvaluationSummaryRecord(
+            id=raw_evaluation_summary.id,
+            submission_id=raw_evaluation_summary.submission_id,
+            batch_id=raw_evaluation_summary.batch_id,
+            user_id=raw_evaluation_summary.user_id,
+            lecture_id=raw_evaluation_summary.lecture_id,
+            assignment_id=raw_evaluation_summary.assignment_id,
+            for_evaluation=raw_evaluation_summary.for_evaluation,
+            eval_id=raw_evaluation_summary.eval_id,
+            arranged_file_id=raw_evaluation_summary.arranged_file_id,
+            result=EvaluationSummaryStatus[raw_evaluation_summary.result],
+            message=raw_evaluation_summary.message,
+            detail=raw_evaluation_summary.detail,
+            score=raw_evaluation_summary.score,
+            eval_title=evaluation_item.title,
+            eval_description=evaluation_item.description,
+            eval_type=EvaluationType[evaluation_item.type],
+            arranged_file_name=arranged_files_dict[evaluation_item.arranged_file_id],
+            judge_result_list=[]
+        )
+        # 評価項目に対応するテストケースのIDリスト
+        testcase_id_list = [testcase.id for testcase in evaluation_item.testcase_list]
+        
+        for testcase_id in testcase_id_list:
+            evaluation_summary.judge_result_list.append(
+                judge_result_dict[testcase_id]
+            )
+        
+        submission_summary.evaluation_summary_list.append(evaluation_summary)
+
+    return submission_summary

@@ -56,7 +56,7 @@ class EvaluationItems(Base):
     description = Column(String)
     score = Column(Integer, nullable=False)
     type = Column(Enum('Built', 'Judge'), nullable=False)
-    arranged_files_id = Column(String(255), ForeignKey('ArrangedFiles.str_id')) 
+    arranged_file_id = Column(String(255), ForeignKey('ArrangedFiles.str_id')) 
     message_on_fail = Column(String(255))
 
 class TestCases(Base):
@@ -131,7 +131,7 @@ class EvaluationSummary(Base):
     assignment_id = Column(Integer, ForeignKey('Problem.assignment_id'), nullable=False)
     for_evaluation = Column(Boolean, ForeignKey('Problem.for_evaluation'), nullable=False)
     eval_id = Column(String(255), ForeignKey('EvaluationItems.str_id'), nullable=False)
-    arranged_files_id = Column(String(255), ForeignKey("ArrangedFiles.str_id"))
+    arranged_file_id = Column(String(255), ForeignKey("ArrangedFiles.str_id"))
     result = Column(Enum('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE'), nullable=False)
     message = Column(String(255)),
     detail = Column(String(255)),

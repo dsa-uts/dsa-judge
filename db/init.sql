@@ -100,15 +100,15 @@ CREATE TABLE EvaluationItems (
     description TEXT, -- 説明
     score INT NOT NULL, -- 評価点
     type ENUM('Built', 'Judge') NOT NULL, -- 採点するタイミング
-    arranged_files_id VARCHAR(255), -- 紐づいているソースコードのID, NULLABLE
+    arranged_file_id VARCHAR(255), -- 紐づいているソースコードのID, NULLABLE
     message_on_fail VARCHAR(255), -- 失敗した場合のメッセージ(一行、10文字程度)
     FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation),
-    FOREIGN KEY (arranged_files_id) REFERENCES ArrangedFiles(str_id)
+    FOREIGN KEY (arranged_file_id) REFERENCES ArrangedFiles(str_id)
 );
 
 -- EvaluationItemsテーブルに初期データを挿入
 INSERT INTO EvaluationItems
-(str_id         , lecture_id, assignment_id, for_evaluation, title         , description                        , score, type        , arranged_files_id, message_on_fail      ) VALUES
+(str_id         , lecture_id, assignment_id, for_evaluation, title         , description                        , score, type        , arranged_file_id, message_on_fail      ) VALUES
 ('1-1-build'    , 1         , 1            , false         , 'compile'     , ''                                 , 0    , 'Built'     , '1-1-make'       , 'コンパイルに失敗しました'),
 ('1-1-check'    , 1         , 1            , false         , 'check'       , ''                                 , 0    , 'Built'     , '1-1-make'       , 'gcd_euclidが定義されていません'),
 ('1-1-small'    , 1         , 1            , false         , 'smallNumber' , ''                                 , 0    , 'Judge'     , NULL             , '小さい数同士のGCDを求められていません'),
@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS EvaluationSummary (
     assignment_id INT NOT NULL, -- 何番目の課題か, e.g., 1, 2, ...
     for_evaluation BOOLEAN NOT NULL, -- 課題採点用かどうか, True/False
     eval_id VARCHAR(255) NOT NULL, -- 評価項目の文字列ID
-    arranged_files_id VARCHAR(255), -- 紐づいているソースコードのID
+    arranged_file_id VARCHAR(255), -- 紐づいているソースコードのID
     /* Aggregation attribltes over JudgeResult */
     result ENUM('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE') NOT NULL, -- 評価項目に含まれる全TestCaseの実行結果
     message VARCHAR(255), -- メッセージ(5文字～10文字程度)
@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS EvaluationSummary (
     FOREIGN KEY (user_id) REFERENCES Users(user_id),
     FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation),
     FOREIGN KEY (eval_id) REFERENCES EvaluationItems(str_id),
-    FOREIGN KEY (arranged_files_id) REFERENCES ArrangedFiles(str_id)
+    FOREIGN KEY (arranged_file_id) REFERENCES ArrangedFiles(str_id)
 );
 
 -- SubmissionSummary(一つの提出における、全体の採点結果)
