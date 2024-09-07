@@ -13,7 +13,6 @@ from db.crud import *
 from db.database import SessionLocal
 from checker import StandardChecker
 import os
-from enum import Enum
 
 # ロガーの設定
 from log.config import judge_logger
@@ -22,47 +21,18 @@ load_dotenv()
 
 RESOURCE_DIR = Path(os.getenv("RESOURCE_PATH"))
 
-StatusOrder = {
-    JudgeSummaryStatus.UNPROCESSED: 0,
-    JudgeSummaryStatus.AC: 1,
-    JudgeSummaryStatus.WA: 2,
-    JudgeSummaryStatus.TLE: 3,
-    JudgeSummaryStatus.MLE: 4,
-    JudgeSummaryStatus.RE: 5,
-    JudgeSummaryStatus.CE: 6,
-    JudgeSummaryStatus.OLE: 7,
-    JudgeSummaryStatus.IE: 8,
-}
-
-
-class JudgeSummaryStatusAggregator:
-    flag: JudgeSummaryStatus
-
-    def __init__(self, flag: JudgeSummaryStatus):
-        self.flag = flag
-
-    def update(self, flag: JudgeSummaryStatus) -> None:
-        if StatusOrder[self.flag] < StatusOrder[flag]:
-            self.flag = flag
-
 class JudgeInfo:
     submission_record: SubmissionRecord # Submissionテーブル内のジャッジリクエストレコード
-    
+
     problem_record: ProblemRecord  # Problemテーブル内のテーブルレコード
 
-    required_files: list[str]  # ユーザに提出を求められているソースコードの名前リスト
-    arranged_filepaths: list[
-        Path
-    ]  # こちらが用意しているソースコードのファイルパスのリスト
+    # ユーザに提出を求められているソースコードの名前リスト
+    required_files: list[str]
+    # こちらが用意しているソースコードのファイルパスのリスト
+    arranged_filepaths: list[Path] 
     uploaded_filepaths: list[Path]  # ユーザが提出したソースコードのファイルパスのリスト
 
-    entire_status: JudgeSummaryStatusAggregator  # テストケース全体のジャッジ結果
-
-    prebuilt_testcases: list[TestCaseRecord]
-
-    postbuilt_testcases: list[TestCaseRecord]
-
-    judge_testcases: list[TestCaseRecord]
+    executable_list: list[str] # ビルド・実行される実行ファイル名リスト
 
     def __init__(
         self,
@@ -71,14 +41,14 @@ class JudgeInfo:
         self.submission_record = submission
 
         db = SessionLocal()
-        
+
         problem_record = fetch_problem(
             db=db,
             lecture_id=self.submission_record.lecture_id,
             assignment_id=self.submission_record.assignment_id,
             for_evaluation=self.submission_record.for_evaluation,
         )
-        
+
         if problem_record is None:
             # Submissionテーブルのstatusをdoneに変更
             self.submission_record.progress = SubmissionProgressStatus.DONE
@@ -89,7 +59,7 @@ class JudgeInfo:
             raise ValueError(self.submission_record.message)
         else:
             self.problem_record = problem_record
-        
+
         judge_logger.debug(f"JudgeInfo.__init__: problem_record: {self.problem_record}")
 
         # Get required file names
@@ -99,7 +69,7 @@ class JudgeInfo:
             assignment_id=self.submission_record.assignment_id,
             for_evaluation=self.submission_record.for_evaluation,
         )
-        
+
         judge_logger.debug(f"JudgeInfo.__init__: required_files: {self.required_files}")
 
         # Get arranged filepaths
@@ -112,7 +82,7 @@ class JudgeInfo:
                 for_evaluation=self.submission_record.for_evaluation,
             )
         ]
-        
+
         judge_logger.debug(f"JudgeInfo.__init__: required_files: {self.required_files}")
 
         # Get uploaded filepaths
@@ -120,31 +90,19 @@ class JudgeInfo:
             RESOURCE_DIR / filepath
             for filepath in fetch_uploaded_filepaths(db=db, submission_id=self.submission_record.id)
         ]
-        
+
         judge_logger.debug(f"JudgeInfo.__init__: uploaded_filepaths: {self.uploaded_filepaths}")
 
-        # Get testcases info
-        testcases = fetch_testcases(
+        # Get executable names
+        self.executable_list = fetch_executables(
             db=db,
             lecture_id=self.submission_record.lecture_id,
             assignment_id=self.submission_record.assignment_id,
             for_evaluation=self.submission_record.for_evaluation,
         )
+        
+        judge_logger.debug(f"JudgeInfo.__init__: executables: {self.executable_list}")
 
-        self.prebuilt_testcases = []
-        self.postbuilt_testcases = []
-        self.judge_testcases = []
-
-        # prebuilt, postbuilt, judgeの種類ごとにtestcasesを分ける
-        for testcase in testcases:
-            if testcase.type == TestCaseType.preBuilt:
-                self.prebuilt_testcases.append(testcase)
-            elif testcase.type == TestCaseType.postBuilt:
-                self.postbuilt_testcases.append(testcase)
-            else: # testcase.type == TestCaseType.Judge
-                self.judge_testcases.append(testcase)
-
-        self.entire_status = JudgeSummaryStatusAggregator(JudgeSummaryStatus.AC)
         db.close()
 
     def _create_complete_volume(self) -> tuple[Volume, Error]:
@@ -169,7 +127,7 @@ class JudgeInfo:
         result: TaskResult,
         expected_stdout: str,
         expected_stderr: str,
-    ) -> JudgeSummaryStatus:
+    ) -> SingleJudgeStatus:
         judge_result_record = JudgeResultRecord(
             submission_id=self.submission_record.id,
             testcase_id=testcase.id,
@@ -195,38 +153,38 @@ class JudgeInfo:
         ) or not StandardChecker.match(expected_stderr, result.stderr):
             judge_result_record.result=SingleJudgeStatus.WA
         else:
-        # AC(正解)として登録
+            # AC(正解)として登録
             judge_result_record.result=SingleJudgeStatus.AC
         register_judge_result(
             db=db,
             result=judge_result_record
         )
-        return JudgeSummaryStatus(judge_result_record.result.value)
-            
+        return judge_result_record.result
+
     def _exec_checker(self, testcase_list: list[TestCaseRecord], initial_volume: Volume, container_name: str, timeoutSec: float, memoryLimitMB: int) -> JudgeSummaryStatus:
         db = SessionLocal()
         status_aggregator: JudgeSummaryStatusAggregator = JudgeSummaryStatusAggregator(JudgeSummaryStatus.AC)
         for testcase in testcase_list:
             args = []
-            
+
             # コマンドが定義されている場合
             if testcase.command is not None:
                 args.append(testcase.command)
             else:
                 # そうでないなら通常のexecutableをargsに追加
                 args = [f"./{self.problem_record.executable}"]
-            
+
             stdin: str = ""
             expected_stdout: str = ""
             expected_stderr: str = ""
-            
+
             try:
                 # 引数をargに追加する
                 if testcase.argument_path is not None:
                     with open(RESOURCE_DIR / testcase.argument_path, "r", encoding='utf-8') as f:
                         arguments = f.read().strip().split()
                         args.extend(arguments)
-                    
+
                 # stdin, expected_stdout, expected_stderrを読み込む
                 if testcase.stdin_path is not None:
                     with open(
@@ -245,7 +203,7 @@ class JudgeInfo:
                     RESOURCE_DIR / testcase.stderr_path, "r", encoding="utf-8"
                 ) as f:
                     expected_stderr = f.read()
-        
+
             except FileNotFoundError as e:
                 register_judge_result(
                     db=db,
@@ -262,7 +220,7 @@ class JudgeInfo:
                 )
                 status_aggregator.update(JudgeSummaryStatus.IE)
                 continue
-            
+
             # sandbox環境のセットアップ
             task = TaskInfo(
                 name=container_name,
@@ -285,7 +243,7 @@ class JudgeInfo:
                 expected_stderr=expected_stderr,
             )
             status_aggregator.update(status)
-        
+
         db.close()
         return status_aggregator.flag
 
@@ -298,7 +256,7 @@ class JudgeInfo:
                 args.extend(compile_command)
         except FileNotFoundError:
             return Error(f"script for compile commands not found: {self.problem_record.build_script_path}")
-    
+
         # sandbox環境のセットアップ
         task = TaskInfo(
             name=container_name,
@@ -308,18 +266,42 @@ class JudgeInfo:
             timeoutSec=2.0,
             memoryLimitMB=512
         )
-        
+
         # sandbox環境で実行
         result, err = task.run()
-        
+
         if not err.silence():
             return Error(f"compile failed: {result.stderr}")
-        
+
         return Error.Nothing()
 
     def judge(self) -> Error:
 
-        # 1. コンパイル前のチェックを行う
+        # 1. ビルド前チェックを行う
+        # アップロードされたファイルの中に、要求されているファイルが含まれているかチェックする。
+        # 注)このとき、他のファイルが含まれていても良しとする(現状の判断では)
+        uploaded_filename = [file_path.name for file_path in self.uploaded_filepaths]
+        
+        # self.required_filesの内容がuploaded_filenameに完全に含まれているか調べる
+        missing_files = set(self.required_files) - set(uploaded_filename)
+        if missing_files:
+            # ファイルが見つからなかったことをDBに登録して、早期終了
+            submission_summary_record = SubmissionSummaryRecord(
+                submission_id=self.submission_record.id,
+                batch_id=self.submission_record.batch_id,
+                user_id=self.submission_record.user_id,
+                lecture_id=self.submission_record.lecture_id,
+                assignment_id=self.submission_record.assignment_id,
+                for_evaluation=self.submission_record.for_evaluation,
+                result=SubmissionSummaryStatus.FN,
+                message="ファイルが存在しません",
+                detail=f"{' '.join(missing_files)}",
+                score=0,
+                evaluation_summary_list=[]
+            )
+            # TODO: SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
+            
+        
         # required_files, arranged_filesが入ったボリュームを作る
         working_volume, err = self._create_complete_volume()
         if not err.silence():
@@ -336,10 +318,10 @@ class JudgeInfo:
             return Error.Nothing()
         else:
             self.submission_record.prebuilt_result = JudgeSummaryStatus.AC
-        
+
         # 2. コンパイルを行う
         err = self._compile(working_volume=working_volume, container_name="checker-lang-gcc")
-        
+
         if not err.silence():
             # 早期終了
             db = SessionLocal()
@@ -348,7 +330,7 @@ class JudgeInfo:
             update_submission_record(db=db, submission_record=self.submission_record)
             db.close()
             return Error.Nothing()
-        
+
         # 3. コンパイル後のチェックを行う
         # チェッカーを走らせる
         postbuilt_result = self._exec_checker(testcase_list=self.postbuilt_testcases, initial_volume=working_volume, container_name="checker-lang-gcc", timeoutSec=2.0, memoryLimitMB=512)
@@ -362,16 +344,16 @@ class JudgeInfo:
             return Error.Nothing()
         else:
             self.submission_record.postbuilt_result = JudgeSummaryStatus.AC
-        
+
         # 4. ジャッジを行う
         # チェッカーを走らせる
-        judge_result = self._exec_checker(testcase_list=self.judge_testcases, initial_volume=working_volume, container_name="binary-runner", timeoutSec=self.problem_record.timeMS / 1000.0, memoryLimitMB=self.problem_record.memoryMB)
-        
+        judge_result = self._exec_checker(testcase_list=self.judge_testcase_list, initial_volume=working_volume, container_name="binary-runner", timeoutSec=self.problem_record.timeMS / 1000.0, memoryLimitMB=self.problem_record.memoryMB)
+
         # ボリュームを削除
         err = working_volume.remove()
         if not err.silence():
             judge_logger.error(f"failed to remove volume: {working_volume.name}")
-        
+
         # ジャッジ結果を登録
         db = SessionLocal()
         self.submission_record.progress = SubmissionProgressStatus.DONE

@@ -85,7 +85,7 @@ class SubmissionRecord:
     id: int
     ts: datetime 
     batch_id: int | None
-    student_id: str
+    user_id: str
     lecture_id: int
     assignment_id: int
     for_evaluation: bool
@@ -108,7 +108,7 @@ def fetch_queued_judge_and_change_status_to_running(db: Session, n: int) -> list
                 id=submission.id,
                 ts=submission.ts,
                 batch_id=submission.batch_id,
-                student_id=submission.student_id,
+                user_id=submission.user_id,
                 lecture_id=submission.lecture_id,
                 assignment_id=submission.assignment_id,
                 for_evaluation=submission.for_evaluation,
@@ -168,22 +168,22 @@ def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluati
             models.Problem.assignment_id == assignment_id,
             models.Problem.for_evaluation == for_evaluation
         ).first()
-        
+
         if problem is None:
             return None
-        
+
         evaluation_items = db.query(models.EvaluationItems).filter(
             models.EvaluationItems.lecture_id == lecture_id,
             models.EvaluationItems.assignment_id == assignment_id,
             models.EvaluationItems.for_evaluation == for_evaluation
         ).all()
-        
+
         evaluation_item_list = []
         for item in evaluation_items:
             testcases = db.query(models.TestCases).filter(
                 models.TestCases.eval_id == item.str_id
             ).all()
-            
+
             testcase_list = [
                 TestCaseRecord(
                     id=testcase.id,
@@ -196,7 +196,7 @@ def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluati
                     exit_code=testcase.exit_code
                 ) for testcase in testcases
             ]
-            
+
             evaluation_item_list.append(
                 EvaluationItemRecord(
                     str_id=item.str_id,
@@ -210,6 +210,9 @@ def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluati
                 )
             )
         
+        # evaluation_item.type == Builtのレコードが先に来るようにソートする。
+        evaluation_item_list.sort(key=lambda x: x.type != EvaluationType.Built)
+
         return ProblemRecord(
             lecture_id=problem.lecture_id,
             assignment_id=problem.assignment_id,
@@ -220,10 +223,29 @@ def fetch_problem(db: Session, lecture_id: int, assignment_id: int, for_evaluati
             memoryMB=problem.memoryMB,
             evaluation_item_list=evaluation_item_list
         )
-    
+
     except Exception as e:
         CRUD_LOGGER.error(f"fetch_problemでエラーが発生しました: {str(e)}")
         return None
+
+
+# 課題のエントリから、そこでビルド・実行される実行ファイル名のリストをExecutablesテーブルから
+# 取得する
+def fetch_executables(
+    db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
+) -> list[str]:
+    CRUD_LOGGER.debug("call fetch_executables")
+    executable_record_list = (
+        db.query(models.Executables)
+        .filter(
+            models.Executables.lecture_id == lecture_id,
+            models.Executables.assignment_id == assignment_id,
+            models.Executables.for_evaluation == for_evaluation,
+        )
+        .all()
+    )
+    return [executable_record.name for executable_record in executable_record_list]
+
 
 # ジャッジリクエストに紐づいている、アップロードされたファイルのパスのリストをUploadedFiles
 # テーブルから取得して返す
@@ -356,9 +378,9 @@ class SubmissionSummaryRecord:
     assignment_id: int
     for_evaluation: bool
     result: SubmissionSummaryStatus
-    message = str | None,
-    detail = str | None,
-    score = int
+    message: str | None
+    detail: str | None
+    score: int
     # 以降、クライアントで必要になるフィールド
     evaluation_summary_list: list[EvaluationSummaryRecord] = []
 
@@ -424,7 +446,7 @@ def register_judge_request(db: Session, batch_id: int | None, student_id: str, l
         id=new_submission.id,
         ts=new_submission.ts,
         batch_id=new_submission.batch_id,
-        student_id=new_submission.student_id,
+        user_id=new_submission.student_id,
         lecture_id=new_submission.lecture_id,
         assignment_id=new_submission.assignment_id,
         for_evaluation=new_submission.for_evaluation,
@@ -499,7 +521,10 @@ def fetch_submission_summary(db: Session, submission_id: int) -> SubmissionSumma
         lecture_id=raw_submission_summary.lecture_id,
         assignment_id=raw_submission_summary.assignment_id,
         for_evaluation=raw_submission_summary.for_evaluation,
-        result=SubmissionSummaryStatus[raw_submission_summary.result]
+        result=SubmissionSummaryStatus[raw_submission_summary.result],
+        message=raw_submission_summary.message,
+        detail=raw_submission_summary.detail,
+        score=raw_submission_summary.score
     )
 
     # Goal: submission_summary.evaluation_summary_listを埋める
