@@ -274,6 +274,12 @@ class JudgeInfo:
             return Error(f"compile failed: {result.stderr}")
 
         return Error.Nothing()
+    
+    def _exec_built_task(self, working_volume: Volume, built_task: EvaluationItemRecord) -> SingleJudgeStatus:
+        # TODO: 実装
+        
+    def _exec_judge_task(self, working_volume: Volume, judge_task: EvaluationItemRecord) -> SingleJudgeStatus:
+        # TODO: 実装
 
     def judge(self) -> Error:
 
@@ -299,13 +305,26 @@ class JudgeInfo:
                 score=0,
                 evaluation_summary_list=[]
             )
-            # TODO: SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
-            
+            with SessionLocal() as db:
+                # TODO: SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
+                register_submission_summary(
+                    db=db,
+                    submission_summary=submission_summary_record
+                )
+                self.submission_record.progress = SubmissionProgressStatus.DONE
+                update_submission_record(
+                    db=db,
+                    submission_record=self.submission_record
+                )
         
+        # 2. 準備
         # required_files, arranged_filesが入ったボリュームを作る
         working_volume, err = self._create_complete_volume()
         if not err.silence():
             return err
+        
+        # 3. Builtテストケース(コンパイル)を実行する
+        
         # チェッカーを走らせる
         prebuilt_result = self._exec_checker(testcase_list=self.prebuilt_testcases, initial_volume=working_volume, container_name="binary-runner", timeoutSec=2.0, memoryLimitMB=512)
         if prebuilt_result is not JudgeSummaryStatus.AC:
