@@ -259,15 +259,15 @@ def fetch_uploaded_filepaths(db: Session, submission_id: int) -> list[str]:
     uploaded_files = db.query(models.UploadedFiles).filter(models.UploadedFiles.submission_id == submission_id).all()
     return [file.path for file in uploaded_files]
 
-# 特定の問題でこちらで用意しているファイルのパス(複数)をArrangedFilesテーブルから取得する
-def fetch_arranged_filepaths(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> list[str]:
-    CRUD_LOGGER.debug("call fetch_arranged_filepaths")
+# 特定の問題でこちらで用意しているファイルのIDとパス(複数)をArrangedFilesテーブルから取得する
+def fetch_arranged_filepaths(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> list[tuple[str, str]]:
+    CRUD_LOGGER.debug("fetch_arranged_filepathsが呼び出されました")
     arranged_files = db.query(models.ArrangedFiles).filter(
         models.ArrangedFiles.lecture_id == lecture_id,
         models.ArrangedFiles.assignment_id == assignment_id,
         models.ArrangedFiles.for_evaluation == for_evaluation
     ).all()
-    return [file.path for file in arranged_files]
+    return [(file.str_id, file.path) for file in arranged_files]
 
 # 特定の問題で必要とされているのファイル名のリストをRequiredFilesテーブルから取得する
 def fetch_required_files(db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool) -> list[str]:
@@ -293,8 +293,8 @@ class JudgeResultRecord:
     description: str | None
     command: str
     stdin: str | None
-    expected_stdout: str
-    expected_stderr: str
+    expected_stdout: str | None
+    expected_stderr: str | None
     expected_exit_code: int = 0
     # テーブル挿入時に自動で決まる値
     id: int = 1 # テーブルに挿入する際は自動設定されるので、コンストラクタで指定する必要が無いように適当な値を入れている
