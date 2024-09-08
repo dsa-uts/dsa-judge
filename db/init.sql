@@ -205,6 +205,13 @@ CREATE TABLE IF NOT EXISTS JudgeResult (
     exit_code INT NOT NULL, -- 戻り値
     stdout TEXT NOT NULL, -- 標準出力
     stderr TEXT NOT NULL, -- 標準エラー出力
+    -- 以降、外部キー関係ではないけどTestCasesから取ってくる値
+    description TEXT, -- TestCases.description
+    command TEXT NOT NULL, -- 実行したコマンド e.g., "./a.out 1 2 -loption..."
+    stdin TEXT, -- 標準入力(実体)
+    expected_stdout TEXT, -- 期待される標準出力
+    expected_stderr TEXT, -- 期待される標準エラー出力
+    expected_exit_code INT NOT NULL DEFAULT 0, -- 期待される戻り値
     FOREIGN KEY (submission_id) REFERENCES Submission(id),
     FOREIGN KEY (testcase_id) REFERENCES TestCases(id)
 );
@@ -225,6 +232,12 @@ CREATE TABLE IF NOT EXISTS EvaluationSummary (
     message VARCHAR(255), -- メッセージ(5文字～10文字程度)
     detail VARCHAR(255), -- 詳細 (ファイルが足りない場合: "main.c func.c....", 実行ファイルが足りない場合: "main, func,...")
     score INT NOT NULL, -- 集計結果 (ACの場合、EvaluationItems.scoreの値、それ以外は0点)
+    -- 以下、外部キー関係ではないけどEvaluationItemsやArrangedFilesから取ってくる値
+    eval_title VARCHAR(255) NOT NULL, -- EvaluationItems.title
+    eval_description TEXT, -- EvaluationItems.description
+    eval_type ENUM('Built', 'Judge') NOT NULL, -- EvaluationItems.type
+    arranged_file_path VARCHAR(255), -- ArrangedFiles.path
+    -- 外部キー関係
     FOREIGN KEY (submission_id) REFERENCES Submission(id),
     FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
     FOREIGN KEY (user_id) REFERENCES Users(user_id),

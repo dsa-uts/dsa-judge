@@ -120,6 +120,12 @@ class JudgeResult(Base):
     exit_code = Column(Integer, nullable=False)
     stdout = Column(String, nullable=False)
     stderr = Column(String, nullable=False)
+    description = Column(String)
+    command = Column(String, nullable=False)
+    stdin = Column(String)
+    expected_stdout = Column(String)
+    expected_stderr = Column(String)
+    expected_exit_code = Column(Integer, nullable=False, default=0)
 
 class EvaluationSummary(Base):
     __tablename__ = 'EvaluationSummary'
@@ -133,9 +139,13 @@ class EvaluationSummary(Base):
     eval_id = Column(String(255), ForeignKey('EvaluationItems.str_id'), nullable=False)
     arranged_file_id = Column(String(255), ForeignKey("ArrangedFiles.str_id"))
     result = Column(Enum('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE'), nullable=False)
-    message = Column(String(255)),
-    detail = Column(String(255)),
-    score = Column(Integer, nullable=False),
+    message = Column(String(255))
+    detail = Column(String(255))
+    score = Column(Integer, nullable=False)
+    eval_title = Column(String(255), nullable=False)
+    eval_description = Column(String)
+    eval_type = Column(Enum('Built', 'Judge'), nullable=False)
+    arranged_file_path = Column(String(255))
 
 class SubmissionSummary(Base):
     __tablename__ = 'SubmissionSummary'
@@ -146,6 +156,6 @@ class SubmissionSummary(Base):
     assignment_id = Column(Integer, ForeignKey('Problem.assignment_id'), nullable=False)
     for_evaluation = Column(Boolean, ForeignKey('Problem.for_evaluation'), nullable=False)
     result = Column(Enum('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'OLE', 'IE', 'FN'), nullable=False)
-    message = Column(String(255)),
-    detail = Column(String(255)),
-    score = Column(Integer, nullable=False),
+    message = Column(String(255))
+    detail = Column(String(255))
+    score = Column(Integer, nullable=False)

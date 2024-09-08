@@ -3,6 +3,11 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
+from dotenv import load_dotenv
+import os
+
+load_dotenv(dotenv_path="../.env")
+RESOURCE_DIR = Path(os.getenv("RESOURCE_PATH"))
 
 from . import models
 
@@ -284,29 +289,36 @@ class JudgeResultRecord:
     exit_code: int
     stdout: str
     stderr: str
+    # TestCasesレコードから取ってくる値
+    description: str | None
+    command: str
+    stdin: str | None
+    expected_stdout: str
+    expected_stderr: str
+    expected_exit_code: int = 0
+    # テーブル挿入時に自動で決まる値
     id: int = 1 # テーブルに挿入する際は自動設定されるので、コンストラクタで指定する必要が無いように適当な値を入れている
     ts: datetime = datetime(1998, 6, 6, 12, 32, 41)
     # 以降は、クライアント側で必要になるフィールド(対応するtestcase_idに対応するテストケースの情報)
-    description: str = ""
-    command: str = ""
-    argument: str = ""
-    stdin: str = ""
-    expected_stdout = ""
-    expected_stderr = ""
-    expected_exit_code = 0
 
 # 特定のテストケースに対するジャッジ結果をJudgeResultテーブルに登録する
-def register_judge_result(db: Session, result: JudgeResultRecord) -> None:
+def register_judge_result(db: Session, judge_result: JudgeResultRecord) -> None:
     CRUD_LOGGER.debug("call register_judge_result")
     judge_result = models.JudgeResult(
-        submission_id=result.submission_id,
-        testcase_id=result.testcase_id,
-        timeMS=result.timeMS,
-        memoryKB=result.memoryKB,
-        exit_code=result.exit_code,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        result=result.result.name
+        submission_id=judge_result.submission_id,
+        testcase_id=judge_result.testcase_id,
+        result=judge_result.result.name,
+        timeMS=judge_result.timeMS,
+        memoryKB=judge_result.memoryKB,
+        exit_code=judge_result.exit_code,
+        stdout=judge_result.stdout,
+        stderr=judge_result.stderr,
+        description=judge_result.description,
+        command=judge_result.command,
+        stdin=judge_result.stdin,
+        expected_stdout=judge_result.expected_stdout,
+        expected_stderr=judge_result.expected_stderr,
+        expected_exit_code=judge_result.expected_exit_code
     )
     db.add(judge_result)
     db.commit()
@@ -327,7 +339,6 @@ def update_submission_record(db: Session, submission_record: SubmissionRecord) -
 
 @dataclass
 class EvaluationSummaryRecord:
-    id: int
     submission_id: int
     batch_id: int | None
     user_id: int
@@ -340,11 +351,14 @@ class EvaluationSummaryRecord:
     message: str | None
     detail: str | None
     score: int
-    # 以降、クライアントで必要になるフィールド
+    # 外部キー関係ではないけどEvaluationItemsやArrangedFilesから取ってくる値
     eval_title: str # EvaluationItems.title
     eval_description: str | None # EvaluationItems.description
     eval_type: EvaluationType # EvaluationItems.type
-    arranged_file_name: str | None
+    arranged_file_path: str | None # Arrangedfiles.path
+    # テーブルに挿入時に自動で値が決まるフィールド
+    id: int = 0 # auto increment PK
+    # 以降、クライアントで必要になるフィールド
     judge_result_list: list[JudgeResultRecord] = []
 
 # 特定のSubmission,さらにその中の評価項目に対応する結果をEvaluationSummaryテーブルに登録する
@@ -362,7 +376,10 @@ def register_evaluation_summary(db: Session, eval_summary: EvaluationSummaryReco
         result=eval_summary.result.name,
         message=eval_summary.message,
         detail=eval_summary.detail,
-        score=eval_summary.score
+        score=eval_summary.score,
+        eval_title=eval_summary.eval_title,
+        eval_description=eval_summary.eval_description,
+        arranged_file_path=eval_summary.arranged_file_path
     )
     db.add(new_eval_summary)
     db.commit()
@@ -556,12 +573,6 @@ def fetch_submission_summary(db: Session, submission_id: int) -> SubmissionSumma
 
     # eval_id -> 対応するEvaluationItemsレコードの情報へアクセスする辞書
     evaluation_items_dict = {item.str_id: item for item in problem_record.evaluation_item_list}
-    
-    arranged_file_id_list = [item.arranged_file_id for item in problem_record.evaluation_item_list]
-    
-    arranged_files_dict = fetch_arranged_file_dict(
-        db=db, arranged_file_id_list=arranged_file_id_list
-    )
 
     for raw_evaluation_summary in raw_evaluation_summary_list:
         evaluation_item = evaluation_items_dict[raw_evaluation_summary.eval_id]
@@ -579,18 +590,17 @@ def fetch_submission_summary(db: Session, submission_id: int) -> SubmissionSumma
             message=raw_evaluation_summary.message,
             detail=raw_evaluation_summary.detail,
             score=raw_evaluation_summary.score,
-            eval_title=evaluation_item.title,
-            eval_description=evaluation_item.description,
-            eval_type=EvaluationType[evaluation_item.type],
-            arranged_file_name=arranged_files_dict[evaluation_item.arranged_file_id],
+            eval_title=raw_evaluation_summary.eval_title,
+            eval_description=raw_evaluation_summary.eval_description,
+            eval_type=EvaluationType[raw_evaluation_summary.eval_type],
+            arranged_file_path=raw_evaluation_summary.arranged_file_path,
             judge_result_list=[]
         )
-        # 評価項目に対応するテストケースのIDリスト
-        testcase_id_list = [testcase.id for testcase in evaluation_item.testcase_list]
         
-        for testcase_id in testcase_id_list:
+        # EvaluationSummaryRecord.judge_result_listに実行結果リストを挿入する
+        for testcase in evaluation_item.testcase_list:
             evaluation_summary.judge_result_list.append(
-                judge_result_dict[testcase_id]
+                judge_result_dict[testcase.id]
             )
         
         submission_summary.evaluation_summary_list.append(evaluation_summary)
