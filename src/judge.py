@@ -425,7 +425,64 @@ class JudgeInfo:
         if not err.silence():
             return err
         
+        evaluation_summary_list = []
+        
         # 3. Builtテストケース(コンパイル)を実行する
+        built_task_list = [task for task in self.problem_record.evaluation_item_list if task.type == EvaluationType.Built]
+        for built_task in built_task_list:
+            evaluation_summary = self._exec_built_task(
+                working_volume=working_volume,
+                built_task=built_task,
+                container_name="checker-lang-gcc"
+            )
+            evaluation_summary_list.append(evaluation_summary)
+            
+            if evaluation_summary.result != EvaluationSummaryStatus.AC:
+                # コンパイル失敗した場合は早期終了する
+                submission_summary_record = SubmissionSummaryRecord(
+                    submission_id=self.submission_record.id,
+                    batch_id=self.submission_record.batch_id,
+                    user_id=self.submission_record.user_id,
+                    lecture_id=self.submission_record.lecture_id,
+                    assignment_id=self.submission_record.assignment_id,
+                    for_evaluation=self.submission_record.for_evaluation,
+                    result=evaluation_summary.result,
+                    message=evaluation_summary.message,
+                    detail=evaluation_summary.detail,
+                    score=evaluation_summary.score,
+                    evaluation_summary_list=evaluation_summary_list
+                )
+                with SessionLocal() as db:
+                    register_submission_summary_recursive(
+                        db=db,
+                        submission_summary=submission_summary_record
+                    )
+                return Error.Nothing()
+        
+        # 4. 必要な実行ファイルが生成されているか調べる
+        
+        # Executablesテーブルから、必要な実行バイナリのファイル名リストを取得
+        executable_list = []
+        with SessionLocal() as db:
+            executable_list = fetch_executables(
+                db=db,
+                lecture_id=self.problem_record.lecture_id,
+                assignment_id=self.problem_record.assignment_id,
+                for_evaluation=self.problem_record.for_evaluation
+            )
+        
+        # Volume内でどのようなファイルが生成されたか調べる
+        sandbox_env = TaskInfo(
+            name="binary-runner", 
+            arguments=["ls"],
+            workDir="/workdir/",
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)])
+        result, err = sandbox_env.run()
+        
+        
+        # TODO: ここから実装する(ファイルチェック)
+        
+            
         
         # チェッカーを走らせる
         prebuilt_result = self._exec_checker(testcase_list=self.prebuilt_testcases, initial_volume=working_volume, container_name="binary-runner", timeoutSec=2.0, memoryLimitMB=512)

@@ -419,6 +419,33 @@ def register_submission_summary(db: Session, submission_summary: SubmissionSumma
     )
     db.add(new_submission_summary)
     db.commit()
+    
+def register_submission_summary_recursive(db: Session, submission_summary: SubmissionSummaryRecord) -> None:
+    CRUD_LOGGER.debug("register_submission_summary_recursiveが呼び出されました")
+    new_submission_summary = models.SubmissionSummary(
+        submission_id=submission_summary.submission_id,
+        batch_id=submission_summary.batch_id,
+        user_id=submission_summary.user_id,
+        lecture_id=submission_summary.lecture_id,
+        assignment_id=submission_summary.assignment_id,
+        for_evaluation=submission_summary.for_evaluation,
+        result=submission_summary.result.name,
+        message=submission_summary.message,
+        detail=submission_summary.detail,
+        score=submission_summary.score
+    )
+    db.add(new_submission_summary)
+    
+    for evaluation_summary in submission_summary.evaluation_summary_list:
+        register_evaluation_summary(
+            db=db, eval_summary=evaluation_summary
+        )
+        for judge_result in evaluation_summary.judge_result_list:
+            register_judge_result(
+                db=db, judge_result=judge_result
+            )
+
+    db.commit() 
 
 # Undo処理: judge-serverをシャットダウンするときに実行する
 # 1. その時点でstatusが"running"になっているジャッジリクエスト(from Submissionテーブル)を
