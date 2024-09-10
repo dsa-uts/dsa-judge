@@ -146,7 +146,7 @@ class JudgeInfo:
         # 紐づいているソースコードのpathを取得
         arranged_file_path = None
         if built_task.arranged_file_id is not None:
-            arranged_file_path = self.arranged_filepath_dict
+            arranged_file_path = self.arranged_filepath_dict[built_task.arranged_file_id]
             
         judge_result_list: list[JudgeResultRecord] = []
         for testcase in built_task.testcase_list:
@@ -247,7 +247,7 @@ class JudgeInfo:
         # 紐づいているソースコードのpathを取得
         arranged_file_path = None
         if judge_task.arranged_file_id is not None:
-            arranged_file_path = self.arranged_filepath_dict
+            arranged_file_path = self.arranged_filepath_dict[judge_task.arranged_file_id]
             
         judge_result_list: list[JudgeResultRecord] = []
         for testcase in judge_task.testcase_list:
@@ -492,7 +492,7 @@ class JudgeInfo:
         # Volume内でどのようなファイルが生成されたか調べる
         sandbox_env = TaskInfo(
             name="binary-runner", 
-            arguments=["ls", "-p", "|", "grep"],
+            arguments=["ls", "-p"],
             workDir="/workdir/",
             volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)])
         result, err = sandbox_env.run()
@@ -507,9 +507,8 @@ class JudgeInfo:
                 submission_summary=submission_summary_record,
                 working_volume=working_volume
             )
-        
-        # TODO: ここから実装する(ファイルチェック)
-        all_files_in_sandbox = result.stdout.strip().split()
+
+        all_files_in_sandbox = [file for file in result.stdout.strip().split() if not file.endswith('/')]
         
         # all_files_in_sandboxの中に、executable_listの要素が全部含まれているか調べる。
         # 含まれていないものがあれば、それをnot_found_listで表す。
@@ -537,6 +536,8 @@ class JudgeInfo:
             evaluation_summary_list.append(evaluation_summary)
             submission_summary_record.score += judge_task.score
             submission_summary_record.result = max(submission_summary_record.result, SubmissionSummaryStatus[evaluation_summary.result.name])
+            
+        submission_summary_record.evaluation_summary_list = evaluation_summary_list
     
         # 全体の結果を登録
         return self._closing_procedure(

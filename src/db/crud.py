@@ -1,15 +1,10 @@
 # Create, Read, Update and Delete (CRUD)
 from sqlalchemy.orm import Session
 from pathlib import Path
-from dataclasses import dataclass
-from datetime import datetime
-from dotenv import load_dotenv
-import os
-
-load_dotenv(dotenv_path="../.env")
-RESOURCE_DIR = Path(os.getenv("RESOURCE_PATH"))
+from pprint import pp
 
 from . import models
+from .records import *
 
 import logging
 CRUD_LOGGER = logging.getLogger("crud")
@@ -19,82 +14,6 @@ def define_crud_logger(logger: logging.Logger):
     CRUD_LOGGER = logger
 
 # ----------------------- for judge server --------------------------------------
-from enum import Enum
-
-class EnumWithOrder(Enum):
-    def __str__(self):
-        return self.name
-
-    def __lt__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value < other.value
-        return NotImplemented
-
-    def __gt__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value > other.value
-        return NotImplemented
-
-    def __le__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value <= other.value
-        return NotImplemented
-
-    def __ge__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value >= other.value
-        return NotImplemented
-
-class SubmissionProgressStatus(Enum):
-    PENDING = 'pending'
-    QUEUED = 'queued'
-    RUNNING = 'running'
-    DONE = 'done'
-
-class SingleJudgeStatus(EnumWithOrder):
-    # (value) = (order)
-    AC  = 0
-    WA  = 1
-    TLE = 2
-    MLE = 3
-    RE  = 4
-    CE  = 5
-    OLE = 6
-    IE  = 7
-
-class EvaluationSummaryStatus(EnumWithOrder):
-    # (value) = (order)
-    AC  = 0
-    WA  = 1
-    TLE = 2
-    MLE = 3
-    RE  = 4
-    CE  = 5
-    OLE = 6
-    IE  = 7
-
-class SubmissionSummaryStatus(EnumWithOrder):
-    # (value) = (order)
-    AC  = 0 # Accepted
-    WA  = 1 # Wrong Answer
-    TLE = 2 # Time Limit Exceed
-    MLE = 3 # Memory Limit Exceed
-    RE  = 4 # Runtime Error
-    CE  = 5 # Compile Error
-    OLE = 6 # Output Limit Exceed (8000 bytes)
-    IE  = 7 # Internal Error (e.g., docker sandbox management)
-    FN  = 8 # File Not found
-
-@dataclass
-class SubmissionRecord:
-    id: int
-    ts: datetime 
-    batch_id: int | None
-    user_id: str
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    progress: SubmissionProgressStatus
 
 # Submissionテーブルから、statusが"queued"のジャッジリクエストを数件取得し、statusを"running"
 # に変え、変更したリクエスト(複数)を返す
@@ -124,43 +43,6 @@ def fetch_queued_judge_and_change_status_to_running(db: Session, n: int) -> list
         db.rollback()
         CRUD_LOGGER.error(f"fetch_queued_judgeでエラーが発生しました: {str(e)}")
         return []
-
-@dataclass
-class TestCaseRecord:
-    id: int
-    description: str | None
-    command: str # nullable=False
-    argument_path: str | None
-    stdin_path: str | None
-    stdout_path: str | None
-    stderr_path: str | None
-    exit_code: int # default: 0
-
-class EvaluationType(EnumWithOrder):
-    Built = 1
-    Judge = 2
-
-@dataclass
-class EvaluationItemRecord:
-    str_id: str
-    title: str
-    description: str | None
-    score: int
-    type: EvaluationType
-    arranged_file_id: str | None
-    message_on_fail: str | None
-    testcase_list: list[TestCaseRecord] # 紐づいているTestCaseRecordのリスト
-
-@dataclass
-class ProblemRecord:
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    title: str
-    description_path: str
-    timeMS: int
-    memoryMB: int
-    evaluation_item_list: list[EvaluationItemRecord] # 紐づいているEvaluationItemRecordのリスト
 
 # lecture_id, assignment_id, for_evaluationのデータから、それに対応するProblemデータ(実行ファイル名、制限リソース量)
 # およびそれに紐づいている評価項目(EvaluationItems)のリストやさらにそのEvaluationItemsに紐づいているTestCasesのリスト
@@ -279,27 +161,6 @@ def fetch_required_files(db: Session, lecture_id: int, assignment_id: int, for_e
     ).all()
     return [file.name for file in required_files]
 
-@dataclass
-class JudgeResultRecord:
-    submission_id: int
-    testcase_id: int
-    result: SingleJudgeStatus
-    timeMS: int
-    memoryKB: int
-    exit_code: int
-    stdout: str
-    stderr: str
-    # TestCasesレコードから取ってくる値
-    description: str | None
-    command: str
-    stdin: str | None
-    expected_stdout: str | None
-    expected_stderr: str | None
-    expected_exit_code: int = 0
-    # テーブル挿入時に自動で決まる値
-    id: int = 1 # テーブルに挿入する際は自動設定されるので、コンストラクタで指定する必要が無いように適当な値を入れている
-    ts: datetime = datetime(1998, 6, 6, 12, 32, 41)
-    # 以降は、クライアント側で必要になるフィールド(対応するtestcase_idに対応するテストケースの情報)
 
 # 特定のテストケースに対するジャッジ結果をJudgeResultテーブルに登録する
 def register_judge_result(db: Session, judge_result: JudgeResultRecord) -> None:
@@ -337,33 +198,10 @@ def update_submission_record(db: Session, submission_record: SubmissionRecord) -
     raw_submission_record.progress = submission_record.progress.value
     db.commit()
 
-@dataclass
-class EvaluationSummaryRecord:
-    submission_id: int
-    batch_id: int | None
-    user_id: int
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    eval_id: str
-    arranged_file_id: str | None
-    result: EvaluationSummaryStatus
-    message: str | None
-    detail: str | None
-    score: int
-    # 外部キー関係ではないけどEvaluationItemsやArrangedFilesから取ってくる値
-    eval_title: str # EvaluationItems.title
-    eval_description: str | None # EvaluationItems.description
-    eval_type: EvaluationType # EvaluationItems.type
-    arranged_file_path: str | None # Arrangedfiles.path
-    # テーブルに挿入時に自動で値が決まるフィールド
-    id: int = 0 # auto increment PK
-    # 以降、クライアントで必要になるフィールド
-    judge_result_list: list[JudgeResultRecord] = []
 
 # 特定のSubmission,さらにその中の評価項目に対応する結果をEvaluationSummaryテーブルに登録する
 def register_evaluation_summary(db: Session, eval_summary: EvaluationSummaryRecord) -> None:
-    CRUD_LOGGER.debug(f"call register_evaluation_summary")
+    CRUD_LOGGER.debug(f"call register_evaluation_summary: {eval_summary}")
     new_eval_summary = models.EvaluationSummary(
         submission_id=eval_summary.submission_id,
         batch_id=eval_summary.batch_id,
@@ -379,27 +217,13 @@ def register_evaluation_summary(db: Session, eval_summary: EvaluationSummaryReco
         score=eval_summary.score,
         eval_title=eval_summary.eval_title,
         eval_description=eval_summary.eval_description,
+        eval_type=eval_summary.eval_type.name,
         arranged_file_path=eval_summary.arranged_file_path
     )
     db.add(new_eval_summary)
     db.commit()
     db.refresh(new_eval_summary)
     eval_summary.id = new_eval_summary.id
-
-@dataclass
-class SubmissionSummaryRecord:
-    submission_id: int
-    batch_id: int | None
-    user_id: str
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    result: SubmissionSummaryStatus
-    message: str | None
-    detail: str | None
-    score: int
-    # 以降、クライアントで必要になるフィールド
-    evaluation_summary_list: list[EvaluationSummaryRecord] = []
 
 
 # 特定のSubmissionに対応するジャッジの集計結果をSubmissionSummaryテーブルに登録する
@@ -474,11 +298,11 @@ def undo_running_submissions(db: Session) -> None:
 # ---------------- for client server -------------------------------------------
 
 # Submissionテーブルにジャッジリクエストを追加する
-def register_judge_request(db: Session, batch_id: int | None, student_id: str, lecture_id: int, assignment_id: int, for_evaluation: bool) -> SubmissionRecord:
+def register_judge_request(db: Session, batch_id: int | None, user_id: str, lecture_id: int, assignment_id: int, for_evaluation: bool) -> SubmissionRecord:
     CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
         batch_id=batch_id,
-        student_id=student_id,
+        user_id=user_id,
         lecture_id=lecture_id,
         assignment_id=assignment_id,
         for_evaluation=for_evaluation,
@@ -490,7 +314,7 @@ def register_judge_request(db: Session, batch_id: int | None, student_id: str, l
         id=new_submission.id,
         ts=new_submission.ts,
         batch_id=new_submission.batch_id,
-        user_id=new_submission.student_id,
+        user_id=new_submission.user_id,
         lecture_id=new_submission.lecture_id,
         assignment_id=new_submission.assignment_id,
         for_evaluation=new_submission.for_evaluation,
@@ -537,12 +361,18 @@ def fetch_judge_results(db: Session, submission_id: int) -> list[JudgeResultReco
             ts=raw_result.ts,
             submission_id=raw_result.submission_id,
             testcase_id=raw_result.testcase_id,
+            result=SingleJudgeStatus[raw_result.result],
             timeMS=raw_result.timeMS,
             memoryKB=raw_result.memoryKB,
             exit_code=raw_result.exit_code,
             stdout=raw_result.stdout,
             stderr=raw_result.stderr,
-            result=SingleJudgeStatus(raw_result.result)
+            description=raw_result.description,
+            command=raw_result.command,
+            stdin=raw_result.stdin,
+            expected_stdout=raw_result.expected_stdout,
+            expected_stderr=raw_result.expected_stderr,
+            expected_exit_code=raw_result.expected_exit_code
         )
         for raw_result in raw_judge_results
     ]
