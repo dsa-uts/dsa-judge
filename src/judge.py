@@ -243,7 +243,7 @@ class JudgeInfo:
             judge_result_list=judge_result_list
         )
                 
-    def _exec_judge_task(self, working_volume: Volume, judge_task: EvaluationItemRecord, container_name: str) -> SingleJudgeStatus:
+    def _exec_judge_task(self, working_volume: Volume, judge_task: EvaluationItemRecord, container_name: str) -> EvaluationSummaryRecord:
         # 紐づいているソースコードのpathを取得
         arranged_file_path = None
         if judge_task.arranged_file_id is not None:
@@ -381,9 +381,43 @@ class JudgeInfo:
             score=score,
             arranged_file_path=arranged_file_path,
             judge_result_list=judge_result_list
-        )            
+        )
+    
+    def _closing_procedure(self, submission_summary: SubmissionSummaryRecord, working_volume: Volume) -> Error:
+        # SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
+        with SessionLocal() as db:
+            register_submission_summary_recursive(
+                db=db,
+                submission_summary=submission_summary
+            )
+            self.submission_record.progress = SubmissionProgressStatus.DONE
+            update_submission_record(
+                db=db,
+                submission_record=self.submission_record
+            )
+        # ボリュームの削除
+        err = working_volume.remove()
+        if not err.silence():
+            judge_logger.error(f"failed to remove volume: {working_volume.name}")
+        
+        return err
+    
 
     def judge(self) -> Error:
+        submission_summary_record = SubmissionSummaryRecord(
+            submission_id=self.submission_record.id,
+            batch_id=self.submission_record.batch_id,
+            user_id=self.submission_record.user_id,
+            lecture_id=self.submission_record.lecture_id,
+            assignment_id=self.submission_record.assignment_id,
+            for_evaluation=self.submission_record.for_evaluation,
+            result=SubmissionSummaryStatus.AC, # 仮
+            message="", # 仮
+            detail="", # 仮
+            score=0, # 仮
+            evaluation_summary_list=[] #仮
+        )
+        
 
         # 1. ビルド前チェックを行う
         # アップロードされたファイルの中に、要求されているファイルが含まれているかチェックする。
@@ -394,36 +428,29 @@ class JudgeInfo:
         missing_files = set(self.required_files) - set(uploaded_filename)
         if missing_files:
             # ファイルが見つからなかったことをDBに登録して、早期終了
-            submission_summary_record = SubmissionSummaryRecord(
-                submission_id=self.submission_record.id,
-                batch_id=self.submission_record.batch_id,
-                user_id=self.submission_record.user_id,
-                lecture_id=self.submission_record.lecture_id,
-                assignment_id=self.submission_record.assignment_id,
-                for_evaluation=self.submission_record.for_evaluation,
-                result=SubmissionSummaryStatus.FN,
-                message="ファイルが存在しません",
-                detail=f"{' '.join(missing_files)}",
-                score=0,
-                evaluation_summary_list=[]
+            submission_summary_record.result = SubmissionSummaryStatus.FN
+            submission_summary_record.message = "ファイルが存在しません"
+            submission_summary_record.detail = f"{' '.join(missing_files)}"
+            submission_summary_record.score = 0
+            submission_summary_record.evaluation_summary_list = []
+            return self._closing_procedure(
+                submission_summary=submission_summary_record,
+                working_volume=working_volume
             )
-            with SessionLocal() as db:
-                # TODO: SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
-                register_submission_summary(
-                    db=db,
-                    submission_summary=submission_summary_record
-                )
-                self.submission_record.progress = SubmissionProgressStatus.DONE
-                update_submission_record(
-                    db=db,
-                    submission_record=self.submission_record
-                )
         
         # 2. 準備
         # required_files, arranged_filesが入ったボリュームを作る
         working_volume, err = self._create_complete_volume()
         if not err.silence():
-            return err
+            submission_summary_record.result = SubmissionSummaryStatus.IE
+            submission_summary_record.message = "error when executing sandbox"
+            submission_summary_record.detail = err.message
+            # submission_summary_record.score = (total sum)
+            submission_summary_record.evaluation_summary_list = evaluation_summary_list
+            return self._closing_procedure(
+                submission_summary=submission_summary_record,
+                working_volume=working_volume
+            )
         
         evaluation_summary_list = []
         
@@ -436,28 +463,19 @@ class JudgeInfo:
                 container_name="checker-lang-gcc"
             )
             evaluation_summary_list.append(evaluation_summary)
+            submission_summary_record.score += built_task.score
             
             if evaluation_summary.result != EvaluationSummaryStatus.AC:
                 # コンパイル失敗した場合は早期終了する
-                submission_summary_record = SubmissionSummaryRecord(
-                    submission_id=self.submission_record.id,
-                    batch_id=self.submission_record.batch_id,
-                    user_id=self.submission_record.user_id,
-                    lecture_id=self.submission_record.lecture_id,
-                    assignment_id=self.submission_record.assignment_id,
-                    for_evaluation=self.submission_record.for_evaluation,
-                    result=evaluation_summary.result,
-                    message=evaluation_summary.message,
-                    detail=evaluation_summary.detail,
-                    score=evaluation_summary.score,
-                    evaluation_summary_list=evaluation_summary_list
+                submission_summary_record.result = SubmissionSummaryStatus.CE
+                submission_summary_record.message = evaluation_summary.message
+                submission_summary_record.detail = evaluation_summary.detail
+                # submission_summary_record.score = (total sum)
+                submission_summary_record.evaluation_summary_list = evaluation_summary_list
+                return self._closing_procedure(
+                    submission_summary=submission_summary_record,
+                    working_volume=working_volume
                 )
-                with SessionLocal() as db:
-                    register_submission_summary_recursive(
-                        db=db,
-                        submission_summary=submission_summary_record
-                    )
-                return Error.Nothing()
         
         # 4. 必要な実行ファイルが生成されているか調べる
         
@@ -474,68 +492,54 @@ class JudgeInfo:
         # Volume内でどのようなファイルが生成されたか調べる
         sandbox_env = TaskInfo(
             name="binary-runner", 
-            arguments=["ls"],
+            arguments=["ls", "-p", "|", "grep"],
             workDir="/workdir/",
             volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)])
         result, err = sandbox_env.run()
         
+        if not err.silence():
+            submission_summary_record.result = SubmissionSummaryStatus.IE
+            submission_summary_record.message = "error when executing sandbox"
+            submission_summary_record.detail = err.message
+            # submission_summary_record.score = (total sum)
+            submission_summary_record.evaluation_summary_list = evaluation_summary_list
+            return self._closing_procedure(
+                submission_summary=submission_summary_record,
+                working_volume=working_volume
+            )
         
         # TODO: ここから実装する(ファイルチェック)
+        all_files_in_sandbox = result.stdout.strip().split()
         
-            
+        # all_files_in_sandboxの中に、executable_listの要素が全部含まれているか調べる。
+        # 含まれていないものがあれば、それをnot_found_listで表す。
+        not_found_executable_set = set(executable_list) - set(all_files_in_sandbox)
+        if not_found_executable_set:
+            # 必要な実行バイナリが見つからなかったことをDBに登録して、早期終了
+            submission_summary_record.result = SubmissionSummaryStatus.CE
+            submission_summary_record.message = "実行ファイルが出力されていません"
+            submission_summary_record.detail = f"{' '.join(not_found_executable_set)}"
+            # submission_summary_record.score = (total sum)
+            submission_summary_record.evaluation_summary_list = evaluation_summary_list
+            return self._closing_procedure(
+                submission_summary=submission_summary_record,
+                working_volume=working_volume
+            )
         
-        # チェッカーを走らせる
-        prebuilt_result = self._exec_checker(testcase_list=self.prebuilt_testcases, initial_volume=working_volume, container_name="binary-runner", timeoutSec=2.0, memoryLimitMB=512)
-        if prebuilt_result is not JudgeSummaryStatus.AC:
-            # 早期終了
-            db = SessionLocal()
-            self.submission_record.progress = SubmissionProgressStatus.DONE
-            self.submission_record.prebuilt_result = prebuilt_result
-            update_submission_record(db=db, submission_record=self.submission_record)
-            db.close()
-            return Error.Nothing()
-        else:
-            self.submission_record.prebuilt_result = JudgeSummaryStatus.AC
-
-        # 2. コンパイルを行う
-        err = self._compile(working_volume=working_volume, container_name="checker-lang-gcc")
-
-        if not err.silence():
-            # 早期終了
-            db = SessionLocal()
-            self.submission_record.progress = SubmissionProgressStatus.DONE
-            self.submission_record.postbuilt_result = JudgeSummaryStatus.CE
-            update_submission_record(db=db, submission_record=self.submission_record)
-            db.close()
-            return Error.Nothing()
-
-        # 3. コンパイル後のチェックを行う
-        # チェッカーを走らせる
-        postbuilt_result = self._exec_checker(testcase_list=self.postbuilt_testcases, initial_volume=working_volume, container_name="checker-lang-gcc", timeoutSec=2.0, memoryLimitMB=512)
-        if postbuilt_result is not JudgeSummaryStatus.AC:
-            # 早期終了
-            db = SessionLocal()
-            self.submission_record.progress = SubmissionProgressStatus.DONE
-            self.submission_record.postbuilt_result = postbuilt_result
-            update_submission_record(db=db, submission_record=self.submission_record)
-            db.close()
-            return Error.Nothing()
-        else:
-            self.submission_record.postbuilt_result = JudgeSummaryStatus.AC
-
-        # 4. ジャッジを行う
-        # チェッカーを走らせる
-        judge_result = self._exec_checker(testcase_list=self.judge_testcase_list, initial_volume=working_volume, container_name="binary-runner", timeoutSec=self.problem_record.timeMS / 1000.0, memoryLimitMB=self.problem_record.memoryMB)
-
-        # ボリュームを削除
-        err = working_volume.remove()
-        if not err.silence():
-            judge_logger.error(f"failed to remove volume: {working_volume.name}")
-
-        # ジャッジ結果を登録
-        db = SessionLocal()
-        self.submission_record.progress = SubmissionProgressStatus.DONE
-        self.submission_record.judge_result = judge_result
-        update_submission_record(db=db, submission_record=self.submission_record)
-        db.close()
-        return Error.Nothing()
+        # Judgeテストケース(実行・チェック)を実行する
+        judge_task_list = [task for task in self.problem_record.evaluation_item_list if task.type == EvaluationType.Judge]
+        for judge_task in judge_task_list:
+            evaluation_summary = self._exec_judge_task(
+                working_volume=working_volume,
+                judge_task=judge_task,
+                container_name="binary-runner"
+            )
+            evaluation_summary_list.append(evaluation_summary)
+            submission_summary_record.score += judge_task.score
+            submission_summary_record.result = max(submission_summary_record.result, SubmissionSummaryStatus[evaluation_summary.result.name])
+    
+        # 全体の結果を登録
+        return self._closing_procedure(
+            submission_summary=submission_summary_record,
+            working_volume=working_volume
+        )
