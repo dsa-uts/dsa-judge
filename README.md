@@ -32,7 +32,7 @@ erDiagram
 		String name "実行ファイル名"
 	}
 	ArrangedFiles {
-		Int id PK "ソースコードのID(auto increment)"
+		String str_id PK "ソースコードのID(auto increment)"
 		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
 		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
 		Boolean for_evaluation FK "課題採点用かどうか, True/False"
@@ -46,7 +46,7 @@ erDiagram
 		String name "ファイル名(Makefileも全部含める)"
 	}
 	EvaluationItems {
-		Int id PK "評価項目のID(auto increment)"
+		String str_id PK "評価項目のID(auto increment)"
 		Int lecture_id FK "何回目の授業で出される課題か, e.g., 1, 2, ..."
 		Int assignment_id FK "何番目の課題か, e.g., 1, 2, ..."
 		Boolean for_evaluation FK "課題採点用かどうか, True/False"
