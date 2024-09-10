@@ -15,6 +15,7 @@ services:
       - "8080:8080"
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - TZ=Asia/Tokyo
   
   mysql:
     image: mysql:9.0
@@ -28,6 +29,7 @@ services:
       MYSQL_DATABASE: task
       MYSQL_USER: judge
       MYSQL_PASSWORD: judge
+      TZ: Asia/Tokyo
     ports:
       - "3306:3306"
     healthcheck:
