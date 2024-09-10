@@ -472,7 +472,7 @@ def test_submit_judge():
         submission = register_judge_request(
             db=db,
             batch_id=None,
-            student_id="sxxxxxxx",
+            user_id="202420659",
             lecture_id=1,
             assignment_id=1,
             for_evaluation=False,
@@ -509,7 +509,12 @@ def test_submit_judge():
     
     # 結果を取得する
     with SessionLocal() as db:
-        judge_results = fetch_judge_results(db=db, submission_id=submission.id)
-    
-    for judge_result in judge_results:
-        test_logger.info(judge_result)
+        submission_summary = fetch_submission_summary(db=db, submission_id=submission.id)
+        
+    test_logger.info(f"entire summary:")
+    test_logger.info(f"{submission_summary!r}")
+    for evaluation_summary in submission_summary.evaluation_summary_list:
+        test_logger.info(f"evaluation summary: {evaluation_summary}")
+        for judge_result in evaluation_summary.judge_result_list:
+            test_logger.info(f"detail: {judge_result}")
+
