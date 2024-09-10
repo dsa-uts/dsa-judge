@@ -154,11 +154,11 @@ erDiagram
 	Users ||--|{ Submission : "has many single submissions"
 	BatchSubmission ||--|{ Submission : "is composed of single submissions"
 	Problem ||--|{ Submission : "has many requested submissions"
-	Submission ||--o{ JudgeResult : "has many judge results or none"
-	TestCases ||--o{ JudgeResult : "has many associated judge results or none"
 	Submission ||--|{ UploadedFiles : "has many associated uploaded files"
-	Submission ||--|{ EvaluationSummary: ""
 	Submission ||--|| SubmissionSummary: ""
+	SubmissionSummary ||--|{ EvaluationSummary: ""
+	EvaluationSummary ||--|{ JudgeResult: ""
+	
 ```
 
 * サンドボックス上で実行する処理として、(1) プログラムをコンパイルする「コンパイル」処理 (2) コンパイルしたプログラムを動作させてチェックする「ジャッジ」処理 (3) その他のファイルが存在するかチェックすることや、オブジェクトファイル解析などの「解析」処理 の3つに分けられる。ジャッジ処理は実行時間やメモリ使用量を指定できるが、コンパイル処理と解析処理は制限時間2秒、最大メモリ使用量512MBに固定する。

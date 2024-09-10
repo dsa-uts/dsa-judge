@@ -274,7 +274,7 @@ def register_submission_summary_recursive(db: Session, submission_summary: Submi
 # Undo処理: judge-serverをシャットダウンするときに実行する
 # 1. その時点でstatusが"running"になっているジャッジリクエスト(from Submissionテーブル)を
 #    全て"queued"に変更する
-# 2. 変更したジャッジリクエストについて、それに紐づいたJudgeResultを全て削除する
+# 2. 変更したジャッジリクエストについて、それに紐づいたJudgeResult, EvaluationSummary, SubmissionSummaryを全て削除する
 def undo_running_submissions(db: Session) -> None:
     CRUD_LOGGER.debug("call undo_running_submissions")
     # 1. "running"状態のSubmissionを全て取得
@@ -290,6 +290,13 @@ def undo_running_submissions(db: Session) -> None:
     
     # 関連するJudgeResultを一括で削除
     db.query(models.JudgeResult).filter(models.JudgeResult.submission_id.in_(submission_id_list)).delete(synchronize_session=False)
+
+    # 関連するEvaluationSummaryを一括で削除
+    db.query(models.EvaluationSummary).filter(models.EvaluationSummary.submission_id.in_(submission_id_list)).delete(synchronize_session=False)
+    
+    # 関連するSubmissionSummaryを一括で削除
+    db.query(models.SubmissionSummary).filter(models.SubmissionSummary.submission_id.in_(submission_id_list)).delete(synchronize_session=False)
+    
     # 変更をコミット
     db.commit()
 
