@@ -100,6 +100,8 @@ class Submission(Base):
     assignment_id = Column(Integer, ForeignKey('Problem.assignment_id'), nullable=False)
     for_evaluation = Column(Boolean, ForeignKey('Problem.for_evaluation'), nullable=False)
     progress = Column(Enum('pending', 'queued', 'running', 'done'), default='pending')
+    total_task = Column(Integer, nullable=False, default=0)
+    completed_task = Column(Integer, nullable=False, default=0)
 
 class UploadedFiles(Base):
     __tablename__ = 'UploadedFiles'

@@ -179,6 +179,8 @@ CREATE TABLE IF NOT EXISTS Submission (
     assignment_id INT NOT NULL, -- 何番目の課題か, e.g., 1, 2, ...
     for_evaluation BOOLEAN NOT NULL, -- 課題採点用かどうか, True/False
     progress ENUM('pending', 'queued', 'running', 'done') DEFAULT 'pending', -- リクエストの処理状況, pending/queued/running/done
+    total_task INT NOT NULL DEFAULT 0, -- 実行しなければならないTestCaseの数
+    completed_task INT NOT NULL DEFAULT 0, -- 現在実行完了しているTestCaseの数
     FOREIGN KEY (batch_id) REFERENCES BatchSubmission(id),
     FOREIGN KEY (user_id) REFERENCES Users(user_id),
     FOREIGN KEY (lecture_id, assignment_id, for_evaluation) REFERENCES Problem(lecture_id, assignment_id, for_evaluation)

@@ -76,6 +76,8 @@ class SubmissionRecord:
     assignment_id: int
     for_evaluation: bool
     progress: SubmissionProgressStatus
+    total_task: int = 0
+    completed_task: int = 0
 
 @dataclass
 class TestCaseRecord:

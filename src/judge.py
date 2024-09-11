@@ -141,6 +141,11 @@ class JudgeInfo:
             # id=(テーブル挿入時に自動で割り当てられる),
             judge_result_list=judge_result_list
         )
+        
+    def _update_progress_of_submission(self, completed_task: int) -> None:
+        self.submission_record.completed_task = completed_task
+        with SessionLocal() as db:
+            update_submission_record(db=db, submission_record=self.submission_record)
     
     def _exec_built_task(self, working_volume: Volume, built_task: EvaluationItemRecord, container_name: str) -> EvaluationSummaryRecord:
         # 紐づいているソースコードのpathを取得
@@ -185,19 +190,6 @@ class JudgeInfo:
             # sandbox環境で実行
             result, err = sandbox_task.run()
             
-            if not err.silence():
-                # 内部エラーにより失敗
-                return self._evaluation_summary(task=built_task,
-                                result=EvaluationSummaryStatus.IE,
-                                message="Internal error while executing sandbox",
-                                detail=err,
-                                score=0,
-                                arranged_file_path=arranged_file_path,
-                                judge_result_list=judge_result_list)
-            
-            # NOTE: ビルドの際は、標準出力、標準エラー出力の確認はせず、戻り値のみの確認とする。
-            # それは、Makefileによるビルドログの出力まで一致確認するのは厳格すぎるから。
-            
             judge_result = JudgeResultRecord(
                         submission_id=self.submission_record.id,
                         testcase_id=testcase.id,
@@ -214,6 +206,26 @@ class JudgeInfo:
                         expected_stderr=None,
                         expected_exit_code=testcase.exit_code
                     )
+            
+            # 進捗状況を更新
+            self._update_progress_of_submission(
+                completed_task=self.submission_record.completed_task + 1
+            )
+            
+            if not err.silence():
+                # 内部エラーにより失敗
+                judge_result.result = SingleJudgeStatus.IE
+                judge_result_list.append(judge_result)
+                return self._evaluation_summary(task=built_task,
+                                result=EvaluationSummaryStatus.IE,
+                                message="Internal error while executing sandbox",
+                                detail=err,
+                                score=0,
+                                arranged_file_path=arranged_file_path,
+                                judge_result_list=judge_result_list)
+            
+            # NOTE: ビルドの際は、標準出力、標準エラー出力の確認はせず、戻り値のみの確認とする。
+            # それは、Makefileによるビルドログの出力まで一致確認するのは厳格すぎるから。
             
             # コンパイルエラーかチェック
             if result.exitCode != testcase.exit_code:
@@ -307,16 +319,6 @@ class JudgeInfo:
             
             # sandbox環境で実行
             result, err = sandbox_task.run()
-            
-            if not err.silence():
-                # 内部エラーにより失敗
-                return self._evaluation_summary(task=judge_task,
-                                result=EvaluationSummaryStatus.IE,
-                                message="Internal error while executing sandbox",
-                                detail=err,
-                                score=0,
-                                arranged_file_path=arranged_file_path,
-                                judge_result_list=judge_result_list)
 
             judge_result = JudgeResultRecord(
                         submission_id=self.submission_record.id,
@@ -334,6 +336,23 @@ class JudgeInfo:
                         expected_stderr=expected_stderr,
                         expected_exit_code=testcase.exit_code
                     )
+            
+            # 進捗状況を更新
+            self._update_progress_of_submission(
+                completed_task=self.submission_record.completed_task + 1
+            )
+            
+            if not err.silence():
+                # 内部エラーにより失敗
+                judge_result.result = SingleJudgeStatus.IE
+                judge_result_list.append(judge_result)
+                return self._evaluation_summary(task=judge_task,
+                                result=EvaluationSummaryStatus.IE,
+                                message="Internal error while executing sandbox",
+                                detail=err,
+                                score=0,
+                                arranged_file_path=arranged_file_path,
+                                judge_result_list=judge_result_list)
             
             # TLEチェック
             if result.TLE:
