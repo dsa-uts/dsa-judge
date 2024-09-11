@@ -24,7 +24,17 @@ def fetch_queued_judge_and_change_status_to_running(db: Session, n: int) -> list
         submission_list = db.query(models.Submission).filter(models.Submission.progress == 'queued').with_for_update(nowait=True).limit(n).all()
         
         for submission in submission_list:
-            submission.progress = 'running'
+            submission.progress = 'running'            
+            # total_task（実行しなければならないTestCaseの数）を求める
+            submission_total_task = db.query(models.TestCases).join(
+                models.EvaluationItems, models.TestCases.eval_id == models.EvaluationItems.str_id
+            ).filter(
+                models.EvaluationItems.lecture_id == submission.lecture_id,
+                models.EvaluationItems.assignment_id == submission.assignment_id,
+                models.EvaluationItems.for_evaluation == submission.for_evaluation
+            ).count()
+            submission.total_task = submission_total_task
+            submission.completed_task = 0
         
         db.commit()
         return [
@@ -36,7 +46,10 @@ def fetch_queued_judge_and_change_status_to_running(db: Session, n: int) -> list
                 lecture_id=submission.lecture_id,
                 assignment_id=submission.assignment_id,
                 for_evaluation=submission.for_evaluation,
-                progress=SubmissionProgressStatus(submission.progress))
+                progress=SubmissionProgressStatus(submission.progress),
+                total_task=submission.total_task,
+                completed_task=submission.completed_task
+            )
             for submission in submission_list
         ]
     except Exception as e:
@@ -196,6 +209,8 @@ def update_submission_record(db: Session, submission_record: SubmissionRecord) -
     # assert raw_submission_record.student_id == submission_record.student_id
     # assert raw_submission_record.for_evaluation == submission_record.for_evaluation
     raw_submission_record.progress = submission_record.progress.value
+    raw_submission_record.total_task = submission_record.total_task
+    raw_submission_record.completed_task = submission_record.completed_task
     db.commit()
 
 
@@ -351,12 +366,23 @@ def enqueue_judge_request(db: Session, submission_id: int) -> None:
         raise ValueError(f"Submission with id {submission_id} not found")
 
 # Submissionテーブルのジャッジリクエストのstatusを確認する
-def fetch_judge_status(db: Session, submission_id: int) -> SubmissionProgressStatus:
+def fetch_submission_record(db: Session, submission_id: int) -> SubmissionRecord:
     CRUD_LOGGER.debug("call fetch_judge_status")
     submission = db.query(models.Submission).filter(models.Submission.id == submission_id).first()
     if submission is None:
         raise ValueError(f"Submission with {submission_id} not found")
-    return SubmissionProgressStatus(submission.progress)
+    return SubmissionRecord(
+        id=submission.id,
+        ts=submission.ts,
+        batch_id=submission.batch_id,
+        user_id=submission.user_id,
+        lecture_id=submission.lecture_id,
+        assignment_id=submission.assignment_id,
+        for_evaluation=submission.for_evaluation,
+        progress=SubmissionProgressStatus(submission.progress),
+        total_task=submission.total_task,
+        completed_task=submission.completed_task
+    )
 
 # 特定のジャッジリクエストに紐づいたジャッジ結果を取得する
 def fetch_judge_results(db: Session, submission_id: int) -> list[JudgeResultRecord]:

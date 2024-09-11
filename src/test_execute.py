@@ -502,8 +502,9 @@ def test_submit_judge():
     while True:
         with SessionLocal() as db:
             # ジャッジが完了するまでsubmissionのステータスを見張る
-            progress = fetch_judge_status(db=db, submission_id=submission.id)
-            if progress == SubmissionProgressStatus.DONE:
+            submission_record = fetch_submission_record(db=db, submission_id=submission.id)
+            test_logger.debug(f"progress: {submission_record.completed_task} / {submission_record.total_task}")
+            if submission_record.progress == SubmissionProgressStatus.DONE:
                 break
         time.sleep(1.0)
     
