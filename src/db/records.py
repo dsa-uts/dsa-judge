@@ -108,6 +108,19 @@ class SubmissionRecord(BaseModel):
         return progress.value
 
 
+class ArrangedFileRecord(BaseModel):
+    str_id: str
+    lecture_id: int
+    assignment_id: int
+    for_evaluation: bool
+    path: str
+
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+
 class TestCaseRecord(BaseModel):
     id: int
     eval_id: str
@@ -172,7 +185,6 @@ class ProblemRecord(BaseModel):
 
 
 class JudgeResultRecord(BaseModel):
-    ts: datetime
     parent_id: int
     submission_id: int
     testcase_id: int
