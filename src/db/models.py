@@ -7,7 +7,6 @@ from sqlalchemy import (
     Enum,
     text,
     ForeignKey,
-    ForeignKeyConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -97,7 +96,7 @@ class Users(Base):
     username = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    is_admin = Column(Boolean, default=False, nullable=False)
+    role = Column(Enum("admin", "manager", "student"), nullable=False)
     disabled = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(
@@ -114,11 +113,9 @@ class LoginHistory(Base):
     user_id = Column(
         String(255), ForeignKey("Users.user_id"), primary_key=True, nullable=False
     )
-    login_at = Column(DateTime, nullable=False)
-    logout_at = Column(DateTime, default=None)
+    login_at = Column(DateTime, nullable=False, primary_key=True)
+    logout_at = Column(DateTime, nullable=False)
     refresh_count = Column(Integer, default=0, nullable=False)
-    current_access_token = Column(String(255), nullable=False)
-    current_refresh_token = Column(String(255), nullable=False)
 
 
 class BatchSubmission(Base):
@@ -156,8 +153,9 @@ class JudgeResult(Base):
     __tablename__ = "JudgeResult"
     id = Column(Integer, primary_key=True, autoincrement=True)
     ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    submission_id = Column(Integer, ForeignKey("Submission.id"))
-    testcase_id = Column(Integer, ForeignKey("TestCases.id"))
+    parent_id = Column(Integer, ForeignKey("EvaluationSummary.id"), nullable=False)
+    submission_id = Column(Integer, ForeignKey("Submission.id"), nullable=False)
+    testcase_id = Column(Integer, ForeignKey("TestCases.id"), nullable=False)
     result = Column(
         Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE"), nullable=False
     )
@@ -177,7 +175,7 @@ class JudgeResult(Base):
 class EvaluationSummary(Base):
     __tablename__ = "EvaluationSummary"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    submission_id = Column(Integer, ForeignKey("Submission.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("SubmissionSummary.submission_id"), nullable=False)
     batch_id = Column(Integer, ForeignKey("BatchSubmission.id"))
     user_id = Column(String(255), ForeignKey("Users.user_id"), nullable=False)
     lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"), nullable=False)
@@ -215,3 +213,12 @@ class SubmissionSummary(Base):
     message = Column(String(255))
     detail = Column(String(255))
     score = Column(Integer, nullable=False)
+
+
+class EvaluationResult(Base):
+    __tablename__ = "EvaluationResult"
+    user_id = Column(String(255), ForeignKey("Users.user_id"), primary_key=True)
+    lecture_id = Column(Integer, ForeignKey("Lecture.id"), primary_key=True)
+    score = Column(Integer)
+    report_path = Column(String(255))
+    comment = Column(String)
