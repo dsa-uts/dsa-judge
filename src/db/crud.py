@@ -158,7 +158,7 @@ def fetch_uploaded_filepaths(db: Session, submission_id: int) -> list[str]:
 # 特定の問題でこちらで用意しているファイルのIDとパス(複数)をArrangedFilesテーブルから取得する
 def fetch_arranged_filepaths(
     db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
-) -> list[tuple[str, str]]:
+) -> list[ArrangedFileRecord]:
     CRUD_LOGGER.debug("fetch_arranged_filepathsが呼び出されました")
     arranged_files = (
         db.query(models.ArrangedFiles)
@@ -169,7 +169,7 @@ def fetch_arranged_filepaths(
         )
         .all()
     )
-    return [(file.str_id, file.path) for file in arranged_files]
+    return [ArrangedFileRecord.model_validate(file) for file in arranged_files]
 
 
 # 特定の問題で必要とされているのファイル名のリストをRequiredFilesテーブルから取得する

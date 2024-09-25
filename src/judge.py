@@ -20,6 +20,7 @@ from log.config import judge_logger
 load_dotenv()
 
 RESOURCE_DIR = Path(os.getenv("RESOURCE_PATH"))
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR_PATH"))
 
 class JudgeInfo:
     submission_record: SubmissionRecord # Submissionテーブル内のジャッジリクエストレコード
@@ -52,11 +53,26 @@ class JudgeInfo:
         if problem_record is None:
             # Submissionテーブルのstatusをdoneに変更
             self.submission_record.progress = SubmissionProgressStatus.DONE
-            # Submissionテーブルのmessageにエラー文を追加
-            self.submission_record.message = f"Error on Problem {self.lecture_id}-{self.assignment_id}:{self.for_evaluation}: Not found"
+            message = f"Error on Problem {self.submission_record.lecture_id}-{self.submission_record.assignment_id}:{self.submission_record.for_evaluation}: Not found"
+            detail = message
+            # SubmissionSummaryレコードを作成
+            submission_summary = SubmissionSummaryRecord(
+                submission_id=self.submission_record.id,
+                batch_id=self.submission_record.batch_id,
+                user_id=self.submission_record.user_id,
+                lecture_id=self.submission_record.lecture_id,
+                assignment_id=self.submission_record.assignment_id,
+                for_evaluation=self.submission_record.for_evaluation,
+                result=SubmissionSummaryStatus.IE,
+                message=message,
+                detail=detail,
+                score=0
+            )
+            
+            register_submission_summary_recursive(db=db, submission_summary=submission_summary)
             update_submission_record(db=db, submission_record=self.submission_record)
             db.close()
-            raise ValueError(self.submission_record.message)
+            raise ValueError(message)
         else:
             self.problem_record = problem_record
 
@@ -74,8 +90,8 @@ class JudgeInfo:
 
         # Get arranged filepaths (The dictionary from str_id -> Path)
         self.arranged_filepath_dict = {
-            str_id: RESOURCE_DIR / filepath
-            for str_id, filepath in fetch_arranged_filepaths(
+            file.str_id: RESOURCE_DIR / file.path
+            for file in fetch_arranged_filepaths(
                 db=db,
                 lecture_id=self.submission_record.lecture_id,
                 assignment_id=self.submission_record.assignment_id,
@@ -87,7 +103,7 @@ class JudgeInfo:
 
         # Get uploaded filepaths
         self.uploaded_filepaths = [
-            RESOURCE_DIR / filepath
+            UPLOAD_DIR / filepath
             for filepath in fetch_uploaded_filepaths(db=db, submission_id=self.submission_record.id)
         ]
 
@@ -122,7 +138,6 @@ class JudgeInfo:
 
     def _evaluation_summary(self, task: EvaluationItemRecord, result: EvaluationSummaryStatus, message: str, detail: str, score: int, arranged_file_path: str | None,  judge_result_list: list[JudgeResultRecord] = []) -> EvaluationSummaryRecord:
         return EvaluationSummaryRecord(
-            submission_id=self.submission_record.id,
             batch_id=self.submission_record.batch_id,
             user_id=self.submission_record.user_id,
             lecture_id=self.submission_record.lecture_id,
@@ -482,7 +497,6 @@ class JudgeInfo:
                 container_name="checker-lang-gcc"
             )
             evaluation_summary_list.append(evaluation_summary)
-            submission_summary_record.score += built_task.score
             
             if evaluation_summary.result != EvaluationSummaryStatus.AC:
                 # コンパイル失敗した場合は早期終了する
@@ -495,6 +509,8 @@ class JudgeInfo:
                     submission_summary=submission_summary_record,
                     working_volume=working_volume
                 )
+            else:
+                submission_summary_record.score += built_task.score
         
         # 4. 必要な実行ファイルが生成されているか調べる
         
@@ -527,7 +543,7 @@ class JudgeInfo:
                 working_volume=working_volume
             )
 
-        all_files_in_sandbox = [file for file in result.stdout.strip().split() if not file.endswith('/')]
+        all_files_in_sandbox = [file for file in result.stdout.strip().split()]
         
         # all_files_in_sandboxの中に、executable_listの要素が全部含まれているか調べる。
         # 含まれていないものがあれば、それをnot_found_listで表す。

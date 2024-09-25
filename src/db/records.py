@@ -95,8 +95,8 @@ class SubmissionRecord(BaseModel):
     assignment_id: int
     for_evaluation: bool
     progress: SubmissionProgressStatus
-    total_task: int = 0
-    completed_task: int = 0
+    total_task: int = Field(default=0)
+    completed_task: int = Field(default=0)
 
     model_config = {
         # sqlalchemyのレコードデータからマッピングするための設定
@@ -185,7 +185,7 @@ class ProblemRecord(BaseModel):
 
 
 class JudgeResultRecord(BaseModel):
-    parent_id: int
+    parent_id: int = Field(default=0)
     submission_id: int
     testcase_id: int
     result: SingleJudgeStatus
@@ -200,11 +200,9 @@ class JudgeResultRecord(BaseModel):
     stdin: str | None
     expected_stdout: str | None
     expected_stderr: str | None
-    expected_exit_code: int = 0
+    expected_exit_code: int = Field(default=0)
     # テーブル挿入時に自動で決まる値
-    id: int = (
-        1  # テーブルに挿入する際は自動設定されるので、コンストラクタで指定する必要が無いように適当な値を入れている
-    )
+    id: int = Field(default=0)
     ts: datetime = Field(default_factory=lambda: datetime(1998, 6, 6, 12, 32, 41))
 
     model_config = {
@@ -218,7 +216,7 @@ class JudgeResultRecord(BaseModel):
 
 
 class EvaluationSummaryRecord(BaseModel):
-    parent_id: int
+    parent_id: int = Field(default=0)
     batch_id: int | None
     user_id: int
     lecture_id: int
@@ -236,7 +234,7 @@ class EvaluationSummaryRecord(BaseModel):
     eval_type: EvaluationType  # EvaluationItems.type
     arranged_file_path: str | None  # Arrangedfiles.path
     # テーブルに挿入時に自動で値が決まるフィールド
-    id: int = 0  # auto increment PK
+    id: int = Field(default=0)  # auto increment PK
     # 以降、クライアントで必要になるフィールド
     judge_result_list: list[JudgeResultRecord] = Field(default_factory=list)
 
