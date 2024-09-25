@@ -121,6 +121,19 @@ class ArrangedFileRecord(BaseModel):
     }
 
 
+class RequiredFileRecord(BaseModel):
+    id: int
+    lecture_id: int
+    assignment_id: int
+    for_evaluation: bool
+    name: str
+    
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+
 class TestCaseRecord(BaseModel):
     id: int
     eval_id: str
@@ -218,7 +231,7 @@ class JudgeResultRecord(BaseModel):
 class EvaluationSummaryRecord(BaseModel):
     parent_id: int = Field(default=0)
     batch_id: int | None
-    user_id: int
+    user_id: str
     lecture_id: int
     assignment_id: int
     for_evaluation: bool
@@ -246,6 +259,10 @@ class EvaluationSummaryRecord(BaseModel):
     @field_serializer("result")
     def serialize_result(self, result: EvaluationSummaryStatus, _info):
         return result.value
+    
+    @field_serializer("eval_type")
+    def serialize_eval_type(self, eval_type: EvaluationType, _info):
+        return eval_type.value
 
 
 class SubmissionSummaryRecord(BaseModel):

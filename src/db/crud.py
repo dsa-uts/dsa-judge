@@ -175,7 +175,7 @@ def fetch_arranged_filepaths(
 # 特定の問題で必要とされているのファイル名のリストをRequiredFilesテーブルから取得する
 def fetch_required_files(
     db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
-) -> list[ArrangedFileRecord]:
+) -> list[RequiredFileRecord]:
     CRUD_LOGGER.debug("call fetch_required_files")
     required_files = (
         db.query(models.RequiredFiles)
@@ -186,7 +186,7 @@ def fetch_required_files(
         )
         .all()
     )
-    return [ArrangedFileRecord.model_validate(file) for file in required_files]
+    return [RequiredFileRecord.model_validate(file) for file in required_files]
 
 
 # 特定のSubmissionに対応するジャッジリクエストの属性値を変更する
@@ -214,34 +214,43 @@ def register_submission_summary_recursive(
     db: Session, submission_summary: SubmissionSummaryRecord
 ) -> None:
     CRUD_LOGGER.debug("register_submission_summary_recursiveが呼び出されました")
-    db_submission_summary = models.SubmissionSummary()
-    # sqlalchemyのモデルのフィールドに対応するもののみSubmissionSummaryレコードからコピーする
-    for var, value in vars(models.SubmissionSummary).items():
-        if var in submission_summary.model_fields:
-            setattr(db_submission_summary, var, getattr(submission_summary, var))
+    # db_submission_summary = models.SubmissionSummary()
+    # # sqlalchemyのモデルのフィールドに対応するもののみSubmissionSummaryレコードからコピーする
+    # for var, value in vars(models.SubmissionSummary).items():
+    #     if var in submission_summary.model_fields:
+    #         setattr(db_submission_summary, var, getattr(submission_summary, var))
+    db_submission_summary = models.SubmissionSummary(
+        **submission_summary.model_dump(exclude={"evaluation_summary_list"})
+    )
     db.add(db_submission_summary)
     db.commit()
     db.refresh(db_submission_summary)
 
-    submission_summary_id = db_submission_summary.assignment_id
+    submission_summary_id = db_submission_summary.submission_id
 
     for evaluation_summary in submission_summary.evaluation_summary_list:
         evaluation_summary.parent_id = submission_summary_id
-        db_evaluation_summary = models.EvaluationSummary()
-        for var, value in vars(models.EvaluationSummary).items():
-            if var in evaluation_summary.model_fields:
-                setattr(db_evaluation_summary, var, getattr(evaluation_summary, var))
+        # db_evaluation_summary = models.EvaluationSummary()
+        # for var, value in vars(models.EvaluationSummary).items():
+        #     if var in evaluation_summary.model_fields:
+        #         setattr(db_evaluation_summary, var, getattr(evaluation_summary, var))
+        db_evaluation_summary = models.EvaluationSummary(
+            **evaluation_summary.model_dump(exclude={"judge_result_list", "ts", "id"})
+        )
         db.add(db_evaluation_summary)
         db.commit()
         db.refresh(db_evaluation_summary)
-        evaluation_summary_id = db_evaluation_summary.assignment_id
+        evaluation_summary_id = db_evaluation_summary.id
 
         for judge_result in evaluation_summary.judge_result_list:
             judge_result.parent_id = evaluation_summary_id
-            db_judge_result = models.JudgeResult()
-            for var, value in vars(models.JudgeResult).items():
-                if var in judge_result.model_fields:
-                    setattr(db_judge_result, var, getattr(judge_result, var))
+            # db_judge_result = models.JudgeResult()
+            # for var, value in vars(models.JudgeResult).items():
+            #     if var in judge_result.model_fields:
+            #         setattr(db_judge_result, var, getattr(judge_result, var))
+            db_judge_result = models.JudgeResult(
+                **judge_result.model_dump(exclude={"id", "ts"})
+            )
             db.add(db_judge_result)
             db.commit()
 

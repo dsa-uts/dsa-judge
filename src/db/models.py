@@ -175,7 +175,7 @@ class JudgeResult(Base):
 class EvaluationSummary(Base):
     __tablename__ = "EvaluationSummary"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    parent_id = Column(Integer, ForeignKey("SubmissionSummary.submission_id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("SubmissionSummary.submission_id"), nullable=False, default=0)
     batch_id = Column(Integer, ForeignKey("BatchSubmission.id"))
     user_id = Column(String(255), ForeignKey("Users.user_id"), nullable=False)
     lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"), nullable=False)
