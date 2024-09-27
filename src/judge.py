@@ -435,8 +435,9 @@ class JudgeInfo:
             err = working_volume.remove()
             if not err.silence():
                 judge_logger.error(f"failed to remove volume: {working_volume.name}")
+                return err
 
-        return err
+        return Error.Nothing()
 
     def judge(self) -> Error:
         submission_summary_record = SubmissionSummaryRecord(
