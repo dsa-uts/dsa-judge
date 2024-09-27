@@ -418,7 +418,7 @@ class JudgeInfo:
             judge_result_list=judge_result_list
         )
 
-    def _closing_procedure(self, submission_summary: SubmissionSummaryRecord, working_volume: Volume) -> Error:
+    def _closing_procedure(self, submission_summary: SubmissionSummaryRecord, working_volume: Volume | None) -> Error:
         # SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
         with SessionLocal() as db:
             register_submission_summary_recursive(
@@ -430,10 +430,11 @@ class JudgeInfo:
                 db=db,
                 submission_record=self.submission_record
             )
-        # ボリュームの削除
-        err = working_volume.remove()
-        if not err.silence():
-            judge_logger.error(f"failed to remove volume: {working_volume.name}")
+        if working_volume is not None:
+            # ボリュームの削除
+            err = working_volume.remove()
+            if not err.silence():
+                judge_logger.error(f"failed to remove volume: {working_volume.name}")
 
         return err
 
@@ -468,7 +469,7 @@ class JudgeInfo:
             submission_summary_record.evaluation_summary_list = []
             return self._closing_procedure(
                 submission_summary=submission_summary_record,
-                working_volume=working_volume
+                working_volume=None
             )
 
         # 2. 準備
