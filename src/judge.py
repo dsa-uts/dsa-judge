@@ -137,7 +137,7 @@ class JudgeInfo:
 
         return (docker_volume, Error.Nothing())
 
-    def _evaluation_summary(self, task: EvaluationItemRecord, result: EvaluationSummaryStatus, message: str, detail: str, score: int, arranged_file_path: str | None,  judge_result_list: list[JudgeResultRecord] = []) -> EvaluationSummaryRecord:
+    def _evaluation_summary(self, task: EvaluationItemRecord, result: EvaluationSummaryStatus, message: str, detail: str, score: int, timeMS: int, memoryKB: int, arranged_file_path: str | None,  judge_result_list: list[JudgeResultRecord] = []) -> EvaluationSummaryRecord:
         return EvaluationSummaryRecord(
             batch_id=self.submission_record.batch_id,
             user_id=self.submission_record.user_id,
@@ -150,6 +150,8 @@ class JudgeInfo:
             message=message,
             detail=detail,
             score=score,
+            timeMS=timeMS,
+            memoryKB=memoryKB,
             eval_title=task.title,
             eval_description=task.description,
             eval_type=task.type,
@@ -168,6 +170,9 @@ class JudgeInfo:
         arranged_file_path = None
         if built_task.arranged_file_id is not None:
             arranged_file_path = self.arranged_filepath_dict[built_task.arranged_file_id]
+
+        timeMS = 0
+        memoryKB = 0
 
         judge_result_list: list[JudgeResultRecord] = []
         for testcase in built_task.testcase_list:
@@ -189,6 +194,8 @@ class JudgeInfo:
                                 message="argument file not found",
                                 detail=f"{testcase.argument_path}",
                                 score=0,
+                                timeMS=timeMS,
+                                memoryKB=memoryKB,
                                 arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None)
 
             # NOTE) コンパイル時は、標準入力は受け付けないものとする。
@@ -205,6 +212,10 @@ class JudgeInfo:
 
             # sandbox環境で実行
             result, err = sandbox_task.run()
+            
+            # 実行時間とメモリの最大値を更新
+            timeMS = max(timeMS, result.timeMS)
+            memoryKB = max(memoryKB, result.memoryByte / 1024)
 
             judge_result = JudgeResultRecord(
                         submission_id=self.submission_record.id,
@@ -237,6 +248,8 @@ class JudgeInfo:
                                 message="Internal error while executing sandbox",
                                 detail=err,
                                 score=0,
+                                timeMS=timeMS,
+                                memoryKB=memoryKB,
                                 arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
                                 judge_result_list=judge_result_list)
 
@@ -253,6 +266,8 @@ class JudgeInfo:
                                 message=f"Compile error when executing {" ".join(args)}",
                                 detail=result.stderr,
                                 score=0,
+                                timeMS=timeMS,
+                                memoryKB=memoryKB,
                                 arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None)
 
             # TestCaseで設定されていたコンパイルジョブが正常に実行完了した
@@ -267,6 +282,8 @@ class JudgeInfo:
             message=f"Compile Success",
             detail="",
             score=built_task.score,
+            timeMS=timeMS,
+            memoryKB=memoryKB,
             arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
             judge_result_list=judge_result_list
         )
@@ -276,6 +293,10 @@ class JudgeInfo:
         arranged_file_path = None
         if judge_task.arranged_file_id is not None:
             arranged_file_path = self.arranged_filepath_dict[judge_task.arranged_file_id]
+
+        # 実行時間とメモリの最大値を初期化
+        timeMS = 0
+        memoryKB = 0
 
         judge_result_list: list[JudgeResultRecord] = []
         for testcase in judge_task.testcase_list:
@@ -298,6 +319,8 @@ class JudgeInfo:
                                 message="argument file not found",
                                 detail=f"{testcase.argument_path}",
                                 score=0,
+                                timeMS=timeMS,
+                                memoryKB=memoryKB,
                                 arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None
                             )
 
@@ -336,6 +359,10 @@ class JudgeInfo:
             # sandbox環境で実行
             result, err = sandbox_task.run()
 
+            # 実行時間とメモリの最大値を更新
+            timeMS = max(timeMS, result.timeMS)
+            memoryKB = max(memoryKB, result.memoryByte / 1024)
+
             judge_result = JudgeResultRecord(
                         submission_id=self.submission_record.id,
                         testcase_id=testcase.id,
@@ -367,6 +394,8 @@ class JudgeInfo:
                                 message="Internal error while executing sandbox",
                                 detail=err,
                                 score=0,
+                                timeMS=timeMS,
+                                memoryKB=memoryKB,
                                 arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
                                 judge_result_list=judge_result_list)
 
@@ -414,6 +443,8 @@ class JudgeInfo:
             message=message,
             detail=detail,
             score=score,
+            timeMS=timeMS,
+            memoryKB=memoryKB,
             arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
             judge_result_list=judge_result_list
         )
@@ -451,6 +482,8 @@ class JudgeInfo:
             message="", # 仮
             detail="", # 仮
             score=0, # 仮
+            timeMS=0, # 仮
+            memoryKB=0, # 仮
             evaluation_summary_list=[] #仮
         )
 
@@ -504,6 +537,9 @@ class JudgeInfo:
                 submission_summary_record.result = SubmissionSummaryStatus.CE
                 submission_summary_record.message = evaluation_summary.message
                 submission_summary_record.detail = evaluation_summary.detail
+                # 実行時間とメモリの最大値を更新
+                submission_summary_record.timeMS = max(submission_summary_record.timeMS, evaluation_summary.timeMS)
+                submission_summary_record.memoryKB = max(submission_summary_record.memoryKB, evaluation_summary.memoryKB)
                 # submission_summary_record.score = (total sum)
                 submission_summary_record.evaluation_summary_list = evaluation_summary_list
                 return self._closing_procedure(
@@ -511,6 +547,10 @@ class JudgeInfo:
                     working_volume=working_volume
                 )
             else:
+                # 実行時間とメモリの最大値を更新
+                submission_summary_record.timeMS = max(submission_summary_record.timeMS, evaluation_summary.timeMS)
+                submission_summary_record.memoryKB = max(submission_summary_record.memoryKB, evaluation_summary.memoryKB)
+                # スコアを加算
                 submission_summary_record.score += built_task.score
 
         # 4. 必要な実行ファイルが生成されているか調べる
@@ -570,7 +610,12 @@ class JudgeInfo:
                 container_name="binary-runner"
             )
             evaluation_summary_list.append(evaluation_summary)
+            # 実行時間とメモリの最大値を更新
+            submission_summary_record.timeMS = max(submission_summary_record.timeMS, evaluation_summary.timeMS)
+            submission_summary_record.memoryKB = max(submission_summary_record.memoryKB, evaluation_summary.memoryKB)
+            # スコアを加算
             submission_summary_record.score += judge_task.score
+            # 全体の結果を更新
             submission_summary_record.result = max(submission_summary_record.result, SubmissionSummaryStatus[evaluation_summary.result.name])
 
         submission_summary_record.evaluation_summary_list = evaluation_summary_list

@@ -191,6 +191,8 @@ class EvaluationSummary(Base):
     message = Column(String(255))
     detail = Column(String(255))
     score = Column(Integer, nullable=False)
+    timeMS = Column(Integer, nullable=False, default=0)
+    memoryKB = Column(Integer, nullable=False, default=0)
     eval_title = Column(String(255), nullable=False)
     eval_description = Column(String)
     eval_type = Column(Enum("Built", "Judge"), nullable=False)
@@ -213,6 +215,8 @@ class SubmissionSummary(Base):
     message = Column(String(255))
     detail = Column(String(255))
     score = Column(Integer, nullable=False)
+    timeMS = Column(Integer, nullable=False, default=0)
+    memoryKB = Column(Integer, nullable=False, default=0)
 
 
 class EvaluationResult(Base):

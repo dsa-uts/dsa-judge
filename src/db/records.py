@@ -241,6 +241,8 @@ class EvaluationSummaryRecord(BaseModel):
     message: str | None
     detail: str | None
     score: int
+    timeMS: int = Field(default=0)
+    memoryKB: int = Field(default=0)
     # 外部キー関係ではないけどEvaluationItemsやArrangedFilesから取ってくる値
     eval_title: str  # EvaluationItems.title
     eval_description: str | None  # EvaluationItems.description
@@ -276,6 +278,8 @@ class SubmissionSummaryRecord(BaseModel):
     message: str | None
     detail: str | None
     score: int
+    timeMS: int = Field(default=0)
+    memoryKB: int = Field(default=0)
     # 以降、クライアントで必要になるフィールド
     evaluation_summary_list: list[EvaluationSummaryRecord] = Field(default_factory=list)
 
