@@ -1,112 +1,186 @@
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field, field_serializer
 from datetime import datetime
 from enum import Enum
 
-class EnumWithOrder(Enum):
+
+class SubmissionProgressStatus(Enum):
+    PENDING = "pending"
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+
+
+# 実行結果の集約をするための、順序定義
+# 各テストケースの実行結果が、["AC", "WA", "AC", "TLE"]の場合、
+# 全体の結果はmaxを取って"TLE"となる。
+JudgeStatusOrder: dict[str, int] = {
+    # (value) : (order)
+    "AC": 0,  # Accepted
+    "WA": 1,  # Wrong Answer
+    "TLE": 2,  # Time Limit Exceed
+    "MLE": 3,  # Memory Limit Exceed
+    "RE": 4,  # Runtime Error
+    "CE": 5,  # Compile Error
+    "OLE": 6,  # Output Limit Exceed (8000 bytes)
+    "IE": 7,  # Internal Error (e.g., docker sandbox management)
+    "FN": 8,  # File Not found
+}
+
+
+class BaseJudgeStatusWithOrder(Enum):
     def __str__(self):
         return self.name
 
     def __lt__(self, other):
         if self.__class__ is other.__class__:
-            return self.value < other.value
+            return JudgeStatusOrder[self.value] < JudgeStatusOrder[other.value]
         return NotImplemented
 
     def __gt__(self, other):
         if self.__class__ is other.__class__:
-            return self.value > other.value
+            return JudgeStatusOrder[self.value] > JudgeStatusOrder[other.value]
         return NotImplemented
 
     def __le__(self, other):
         if self.__class__ is other.__class__:
-            return self.value <= other.value
+            return JudgeStatusOrder[self.value] <= JudgeStatusOrder[other.value]
         return NotImplemented
 
     def __ge__(self, other):
         if self.__class__ is other.__class__:
-            return self.value >= other.value
+            return JudgeStatusOrder[self.value] >= JudgeStatusOrder[other.value]
         return NotImplemented
 
-class SubmissionProgressStatus(Enum):
-    PENDING = 'pending'
-    QUEUED = 'queued'
-    RUNNING = 'running'
-    DONE = 'done'
 
-class SingleJudgeStatus(EnumWithOrder):
-    # (value) = (order)
-    AC  = 0
-    WA  = 1
-    TLE = 2
-    MLE = 3
-    RE  = 4
-    CE  = 5
-    OLE = 6
-    IE  = 7
+class SingleJudgeStatus(BaseJudgeStatusWithOrder):
+    AC = "AC"  # Accepted
+    WA = "WA"  # Wrong Answer
+    TLE = "TLE"  # Time Limit Exceed
+    MLE = "MLE"  # Memory Limit Exceed
+    RE = "RE"  # Runtime Error
+    CE = "CE"  # Compile Error
+    OLE = "OLE"  # Output Limit Exceed (8000 bytes)
+    IE = "IE"  # Internal Error (e.g., docker sandbox management)
 
-class EvaluationSummaryStatus(EnumWithOrder):
-    # (value) = (order)
-    AC  = 0
-    WA  = 1
-    TLE = 2
-    MLE = 3
-    RE  = 4
-    CE  = 5
-    OLE = 6
-    IE  = 7
 
-class SubmissionSummaryStatus(EnumWithOrder):
-    # (value) = (order)
-    AC  = 0 # Accepted
-    WA  = 1 # Wrong Answer
-    TLE = 2 # Time Limit Exceed
-    MLE = 3 # Memory Limit Exceed
-    RE  = 4 # Runtime Error
-    CE  = 5 # Compile Error
-    OLE = 6 # Output Limit Exceed (8000 bytes)
-    IE  = 7 # Internal Error (e.g., docker sandbox management)
-    FN  = 8 # File Not found
+class EvaluationSummaryStatus(BaseJudgeStatusWithOrder):
+    AC = "AC"  # Accepted
+    WA = "WA"  # Wrong Answer
+    TLE = "TLE"  # Time Limit Exceed
+    MLE = "MLE"  # Memory Limit Exceed
+    RE = "RE"  # Runtime Error
+    CE = "CE"  # Compile Error
+    OLE = "OLE"  # Output Limit Exceed (8000 bytes)
+    IE = "IE"  # Internal Error (e.g., docker sandbox management)
 
-@dataclass
-class SubmissionRecord:
+
+class SubmissionSummaryStatus(BaseJudgeStatusWithOrder):
+    AC = "AC"  # Accepted
+    WA = "WA"  # Wrong Answer
+    TLE = "TLE"  # Time Limit Exceed
+    MLE = "MLE"  # Memory Limit Exceed
+    RE = "RE"  # Runtime Error
+    CE = "CE"  # Compile Error
+    OLE = "OLE"  # Output Limit Exceed (8000 bytes)
+    IE = "IE"  # Internal Error (e.g., docker sandbox management)
+    FN = "FN"  # File Not found
+
+
+class SubmissionRecord(BaseModel):
     id: int
-    ts: datetime 
+    ts: datetime
     batch_id: int | None
     user_id: str
     lecture_id: int
     assignment_id: int
     for_evaluation: bool
     progress: SubmissionProgressStatus
-    total_task: int = 0
-    completed_task: int = 0
+    total_task: int = Field(default=0)
+    completed_task: int = Field(default=0)
 
-@dataclass
-class TestCaseRecord:
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+    @field_serializer("progress")
+    def serialize_progress(self, progress: SubmissionProgressStatus, _info):
+        return progress.value
+
+
+class ArrangedFileRecord(BaseModel):
+    str_id: str
+    lecture_id: int
+    assignment_id: int
+    for_evaluation: bool
+    path: str
+
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+
+class RequiredFileRecord(BaseModel):
     id: int
+    lecture_id: int
+    assignment_id: int
+    for_evaluation: bool
+    name: str
+    
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+
+class TestCaseRecord(BaseModel):
+    id: int
+    eval_id: str
     description: str | None
-    command: str # nullable=False
+    command: str  # nullable=False
     argument_path: str | None
     stdin_path: str | None
     stdout_path: str | None
     stderr_path: str | None
-    exit_code: int # default: 0
+    exit_code: int  # default: 0
 
-class EvaluationType(EnumWithOrder):
-    Built = 1
-    Judge = 2
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
 
-@dataclass
-class EvaluationItemRecord:
+
+class EvaluationType(Enum):
+    Built = "Built"
+    Judge = "Judge"
+
+
+class EvaluationItemRecord(BaseModel):
     str_id: str
+    lecture_id: int
+    assignment_id: int
+    for_evaluation: bool
     title: str
     description: str | None
     score: int
     type: EvaluationType
     arranged_file_id: str | None
     message_on_fail: str | None
-    testcase_list: list[TestCaseRecord] # 紐づいているTestCaseRecordのリスト
+    # 紐づいているTestCaseRecordのリスト
+    testcase_list: list[TestCaseRecord] = Field(default_factory=list)
 
-@dataclass
-class ProblemRecord:
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+    @field_serializer("type")
+    def serialize_type(self, type: EvaluationType, _info):
+        return type.value
+
+
+class ProblemRecord(BaseModel):
     lecture_id: int
     assignment_id: int
     for_evaluation: bool
@@ -114,10 +188,17 @@ class ProblemRecord:
     description_path: str
     timeMS: int
     memoryMB: int
-    evaluation_item_list: list[EvaluationItemRecord] # 紐づいているEvaluationItemRecordのリスト
+    # 紐づいているEvaluationItemRecordのリスト
+    evaluation_item_list: list[EvaluationItemRecord] = Field(default_factory=list)
 
-@dataclass
-class JudgeResultRecord:
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+
+class JudgeResultRecord(BaseModel):
+    parent_id: int = Field(default=0)
     submission_id: int
     testcase_id: int
     result: SingleJudgeStatus
@@ -132,16 +213,25 @@ class JudgeResultRecord:
     stdin: str | None
     expected_stdout: str | None
     expected_stderr: str | None
-    expected_exit_code: int = 0
+    expected_exit_code: int = Field(default=0)
     # テーブル挿入時に自動で決まる値
-    id: int = 1 # テーブルに挿入する際は自動設定されるので、コンストラクタで指定する必要が無いように適当な値を入れている
-    ts: datetime = datetime(1998, 6, 6, 12, 32, 41)
+    id: int = Field(default=0)
+    ts: datetime = Field(default_factory=lambda: datetime(1998, 6, 6, 12, 32, 41))
 
-@dataclass
-class EvaluationSummaryRecord:
-    submission_id: int
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+    @field_serializer("result")
+    def serialize_result(self, result: SingleJudgeStatus, _info):
+        return result.value
+
+
+class EvaluationSummaryRecord(BaseModel):
+    parent_id: int = Field(default=0)
     batch_id: int | None
-    user_id: int
+    user_id: str
     lecture_id: int
     assignment_id: int
     for_evaluation: bool
@@ -151,18 +241,33 @@ class EvaluationSummaryRecord:
     message: str | None
     detail: str | None
     score: int
+    timeMS: int = Field(default=0)
+    memoryKB: int = Field(default=0)
     # 外部キー関係ではないけどEvaluationItemsやArrangedFilesから取ってくる値
-    eval_title: str # EvaluationItems.title
-    eval_description: str | None # EvaluationItems.description
-    eval_type: EvaluationType # EvaluationItems.type
-    arranged_file_path: str | None # Arrangedfiles.path
+    eval_title: str  # EvaluationItems.title
+    eval_description: str | None  # EvaluationItems.description
+    eval_type: EvaluationType  # EvaluationItems.type
+    arranged_file_path: str | None  # Arrangedfiles.path
     # テーブルに挿入時に自動で値が決まるフィールド
-    id: int = 0 # auto increment PK
+    id: int = Field(default=0)  # auto increment PK
     # 以降、クライアントで必要になるフィールド
-    judge_result_list: list[JudgeResultRecord] = field(default_factory=list)
+    judge_result_list: list[JudgeResultRecord] = Field(default_factory=list)
 
-@dataclass
-class SubmissionSummaryRecord:
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+    @field_serializer("result")
+    def serialize_result(self, result: EvaluationSummaryStatus, _info):
+        return result.value
+    
+    @field_serializer("eval_type")
+    def serialize_eval_type(self, eval_type: EvaluationType, _info):
+        return eval_type.value
+
+
+class SubmissionSummaryRecord(BaseModel):
     submission_id: int
     batch_id: int | None
     user_id: str
@@ -173,5 +278,26 @@ class SubmissionSummaryRecord:
     message: str | None
     detail: str | None
     score: int
+    timeMS: int = Field(default=0)
+    memoryKB: int = Field(default=0)
     # 以降、クライアントで必要になるフィールド
-    evaluation_summary_list: list[EvaluationSummaryRecord] = field(default_factory=list)
+    evaluation_summary_list: list[EvaluationSummaryRecord] = Field(default_factory=list)
+
+    model_config = {
+        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+    @field_serializer("result")
+    def serialize_result(self, result: SubmissionSummaryStatus, _info):
+        return result.value
+
+
+class EvaluationResultRecord(BaseModel):
+    user_id: str
+    lecture_id: int
+    score: int | None
+    report_path: str | None
+    comment: str | None
+
+    model_config = {"from_attributes": True}

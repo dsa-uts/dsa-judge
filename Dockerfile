@@ -4,6 +4,15 @@ FROM python:3.12.4-slim
 # 作業ディレクトリの設定
 WORKDIR /app
 
+# dockerizeのバージョンを環境変数として設定
+ENV DOCKERIZE_VERSION v0.8.0
+
+# dockerizeをダウンロードしてインストール
+RUN apt-get update \
+    && apt-get install -y wget \
+    && wget -O - https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz | tar xzf - -C /usr/local/bin \
+    && apt-get autoremove -yqq --purge wget && rm -rf /var/lib/apt/lists/*
+
 # ------------- Dockerクライアントのみのインストール ---------------------------------
 # 参考: https://docs.docker.com/engine/install/debian/#install-using-the-repository
 # Add Docker's official GPG key:
@@ -32,4 +41,4 @@ RUN PYTHONDONTWRITEBYTECODE=1 pip install --no-cache-dir -r requirements/require
 # COPY src/ .
 
 # FastAPIアプリケーションの起動
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["dockerize", "-wait", "tcp://db:3306", "-timeout", "30s", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

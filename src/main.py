@@ -99,4 +99,8 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         undo_running_submissions(db)
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="DSA Judge Server",
+    description="このサーバーはバックグラウンドでジャッジリクエストを処理します。エンドポイントは公開していません。",
+    version="0.1.0",
+    lifespan=lifespan)

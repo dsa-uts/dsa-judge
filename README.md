@@ -9,6 +9,8 @@ DBサーバーに登録する。
 
 見づらい場合は、[pdf](schema.pdf)を参照
 
+TODO: スキーマの更新
+
 ```mermaid 
 erDiagram
 	Lecture {
