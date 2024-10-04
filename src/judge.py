@@ -386,13 +386,14 @@ class JudgeInfo:
             )
 
             if not err.silence():
+                judge_logger.critical(f"Internal error while executing sandbox: {err.message}")
                 # 内部エラーにより失敗
                 judge_result.result = SingleJudgeStatus.IE
                 judge_result_list.append(judge_result)
                 return self._evaluation_summary(task=judge_task,
                                 result=EvaluationSummaryStatus.IE,
                                 message="Internal error while executing sandbox",
-                                detail=err,
+                                detail=err.message,
                                 score=0,
                                 timeMS=timeMS,
                                 memoryKB=memoryKB,
