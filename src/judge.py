@@ -246,7 +246,7 @@ class JudgeInfo:
                 return self._evaluation_summary(task=built_task,
                                 result=EvaluationSummaryStatus.IE,
                                 message="Internal error while executing sandbox",
-                                detail=err,
+                                detail=err.message,
                                 score=0,
                                 timeMS=timeMS,
                                 memoryKB=memoryKB,
