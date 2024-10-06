@@ -292,12 +292,3 @@ class SubmissionSummaryRecord(BaseModel):
     def serialize_result(self, result: SubmissionSummaryStatus, _info):
         return result.value
 
-
-class EvaluationResultRecord(BaseModel):
-    user_id: str
-    lecture_id: int
-    score: int | None
-    report_path: str | None
-    comment: str | None
-
-    model_config = {"from_attributes": True}

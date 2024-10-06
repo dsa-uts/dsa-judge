@@ -118,13 +118,6 @@ class LoginHistory(Base):
     refresh_count = Column(Integer, default=0, nullable=False)
 
 
-class BatchSubmission(Base):
-    __tablename__ = "BatchSubmission"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    user_id = Column(String(255), ForeignKey("Users.user_id"))
-
-
 class Submission(Base):
     __tablename__ = "Submission"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -218,11 +211,3 @@ class SubmissionSummary(Base):
     timeMS = Column(Integer, nullable=False, default=0)
     memoryKB = Column(Integer, nullable=False, default=0)
 
-
-class EvaluationResult(Base):
-    __tablename__ = "EvaluationResult"
-    user_id = Column(String(255), ForeignKey("Users.user_id"), primary_key=True)
-    lecture_id = Column(Integer, ForeignKey("Lecture.id"), primary_key=True)
-    score = Column(Integer)
-    report_path = Column(String(255))
-    comment = Column(String)
