@@ -118,6 +118,17 @@ class LoginHistory(Base):
     refresh_count = Column(Integer, default=0, nullable=False)
 
 
+class BatchSubmission(Base):
+    __tablename__ = "BatchSubmission"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    user_id = Column(String(255), ForeignKey("Users.user_id"))
+    lecture_id = Column(Integer, ForeignKey("Lecture.id"), nullable=False)
+    message = Column(String(255), nullable=True)
+    complete_judge = Column(Integer, nullable=True)
+    total_judge = Column(Integer, nullable=True)
+
+
 class Submission(Base):
     __tablename__ = "Submission"
     id = Column(Integer, primary_key=True, autoincrement=True)
