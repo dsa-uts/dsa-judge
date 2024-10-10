@@ -2,9 +2,9 @@
 from sqlalchemy.orm import Session
 from pathlib import Path
 from pprint import pp
+from sqlalchemy import inspect
 
-from . import models
-from .records import *
+from db import models, records
 
 import logging
 
@@ -23,7 +23,7 @@ def define_crud_logger(logger: logging.Logger):
 # に変え、変更したリクエスト(複数)を返す
 def fetch_queued_judge_and_change_status_to_running(
     db: Session, n: int
-) -> list[SubmissionRecord]:
+) -> list[records.Submission]:
     CRUD_LOGGER.debug("fetch_queued_judgeが呼び出されました")
     try:
         # FOR UPDATE NOWAITを使用して排他的にロックを取得
@@ -40,15 +40,10 @@ def fetch_queued_judge_and_change_status_to_running(
             # total_task（実行しなければならないTestCaseの数）を求める
             submission_total_task = (
                 db.query(models.TestCases)
-                .join(
-                    models.EvaluationItems,
-                    models.TestCases.eval_id == models.EvaluationItems.str_id,
-                )
-                .filter(
-                    models.EvaluationItems.lecture_id == submission.lecture_id,
-                    models.EvaluationItems.assignment_id == submission.assignment_id,
-                    models.EvaluationItems.for_evaluation == submission.for_evaluation,
-                )
+                .filter(models.TestCases.lecture_id == submission.lecture_id, 
+                        models.TestCases.assignment_id == submission.assignment_id,
+                        # 非評価用の課題は必ず含めるものとする
+                        (models.TestCases.eval == submission.eval) | (models.TestCases.eval == False))
                 .count()
             )
             submission.total_task = submission_total_task
@@ -56,7 +51,9 @@ def fetch_queued_judge_and_change_status_to_running(
 
         db.commit()
         return [
-            SubmissionRecord.model_validate(submission)
+            # sqlalchemyのrelationshipのlazy loadingにより
+            # uploaded_filesが埋まる
+            records.Submission.model_validate(submission)
             for submission in submission_list
         ]
     except Exception as e:
@@ -65,12 +62,11 @@ def fetch_queued_judge_and_change_status_to_running(
         return []
 
 
-# lecture_id, assignment_id, for_evaluationのデータから、それに対応するProblemデータ(実行ファイル名、制限リソース量)
-# およびそれに紐づいている評価項目(EvaluationItems)のリストやさらにそのEvaluationItemsに紐づいているTestCasesのリスト
-# を取得
+# lecture_id, assignment_idのデータから、それに対応するProblemデータを全て取得する
+# eval=Trueの場合は、評価用のデータも取得する
 def fetch_problem(
-    db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
-) -> ProblemRecord | None:
+    db: Session, lecture_id: int, assignment_id: int, eval: bool
+) -> records.Problem | None:
     CRUD_LOGGER.debug("fetch_problemが呼び出されました")
     try:
         problem = (
@@ -78,120 +74,20 @@ def fetch_problem(
             .filter(
                 models.Problem.lecture_id == lecture_id,
                 models.Problem.assignment_id == assignment_id,
-                models.Problem.for_evaluation == for_evaluation,
             )
             .first()
         )
-
-        if problem is None:
-            return None
-
-        evaluation_items = (
-            db.query(models.EvaluationItems)
-            .filter(
-                models.EvaluationItems.lecture_id == lecture_id,
-                models.EvaluationItems.assignment_id == assignment_id,
-                models.EvaluationItems.for_evaluation == for_evaluation,
-            )
-            .all()
-        )
-
-        evaluation_item_list = []
-        for item in evaluation_items:
-            testcases = (
-                db.query(models.TestCases)
-                .filter(models.TestCases.eval_id == item.str_id)
-                .all()
-            )
-
-            testcase_list = [
-                TestCaseRecord.model_validate(testcase) for testcase in testcases
-            ]
-
-            evaluation_item_record = EvaluationItemRecord.model_validate(item)
-            evaluation_item_record.testcase_list = testcase_list
-
-            evaluation_item_list.append(evaluation_item_record)
-
-        # evaluation_item.type == Builtのレコードが先に来るようにソートする。
-        evaluation_item_list.sort(key=lambda x: x.type != EvaluationType.Built)
-
-        problem_record = ProblemRecord.model_validate(problem)
-        problem_record.evaluation_item_list = evaluation_item_list
-
-        return problem_record
+        
+        # ここで、lazy loadingにより、executables, arranged_files, required_files, test_casesが埋まる
+        return records.Problem.model_validate(problem)
     except Exception as e:
         CRUD_LOGGER.error(f"fetch_problemでエラーが発生しました: {str(e)}")
         return None
 
 
-# 課題のエントリから、そこでビルド・実行される実行ファイル名のリストをExecutablesテーブルから
-# 取得する
-def fetch_executables(
-    db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
-) -> list[str]:
-    CRUD_LOGGER.debug("call fetch_executables")
-    executable_record_list = (
-        db.query(models.Executables)
-        .filter(
-            models.Executables.lecture_id == lecture_id,
-            models.Executables.assignment_id == assignment_id,
-            models.Executables.for_evaluation == for_evaluation,
-        )
-        .all()
-    )
-    return [executable_record.name for executable_record in executable_record_list]
-
-
-# ジャッジリクエストに紐づいている、アップロードされたファイルのパスのリストをUploadedFiles
-# テーブルから取得して返す
-def fetch_uploaded_filepaths(db: Session, submission_id: int) -> list[str]:
-    CRUD_LOGGER.debug("call fetch_uploaded_filepaths")
-    uploaded_files = (
-        db.query(models.UploadedFiles)
-        .filter(models.UploadedFiles.submission_id == submission_id)
-        .all()
-    )
-    return [file.path for file in uploaded_files]
-
-
-# 特定の問題でこちらで用意しているファイルのIDとパス(複数)をArrangedFilesテーブルから取得する
-def fetch_arranged_filepaths(
-    db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
-) -> list[ArrangedFileRecord]:
-    CRUD_LOGGER.debug("fetch_arranged_filepathsが呼び出されました")
-    arranged_files = (
-        db.query(models.ArrangedFiles)
-        .filter(
-            models.ArrangedFiles.lecture_id == lecture_id,
-            models.ArrangedFiles.assignment_id == assignment_id,
-            models.ArrangedFiles.for_evaluation == for_evaluation,
-        )
-        .all()
-    )
-    return [ArrangedFileRecord.model_validate(file) for file in arranged_files]
-
-
-# 特定の問題で必要とされているのファイル名のリストをRequiredFilesテーブルから取得する
-def fetch_required_files(
-    db: Session, lecture_id: int, assignment_id: int, for_evaluation: bool
-) -> list[RequiredFileRecord]:
-    CRUD_LOGGER.debug("call fetch_required_files")
-    required_files = (
-        db.query(models.RequiredFiles)
-        .filter(
-            models.RequiredFiles.lecture_id == lecture_id,
-            models.RequiredFiles.assignment_id == assignment_id,
-            models.RequiredFiles.for_evaluation == for_evaluation,
-        )
-        .all()
-    )
-    return [RequiredFileRecord.model_validate(file) for file in required_files]
-
-
 # 特定のSubmissionに対応するジャッジリクエストの属性値を変更する
 # 注) SubmissionRecord.idが同じレコードがテーブル内にあること
-def update_submission_record(db: Session, submission_record: SubmissionRecord) -> None:
+def update_submission_record(db: Session, submission_record: records.Submission) -> None:
     CRUD_LOGGER.debug("call update_submission_status")
     raw_submission_record = (
         db.query(models.Submission)
@@ -202,8 +98,10 @@ def update_submission_record(db: Session, submission_record: SubmissionRecord) -
         raise ValueError(f"Submission with id {submission_record.id} not found")
 
     # assert raw_submission_record.batch_id == submission_record.batch_id
-    # assert raw_submission_record.student_id == submission_record.student_id
-    # assert raw_submission_record.for_evaluation == submission_record.for_evaluation
+    # assert raw_submission_record.user_id == submission_record.user_id
+    # assert raw_submission_record.lecture_id == submission_record.lecture_id
+    # assert raw_submission_record.assignment_id == submission_record.assignment_id
+    # assert raw_submission_record.eval == submission_record.eval
     raw_submission_record.progress = submission_record.progress.value
     raw_submission_record.total_task = submission_record.total_task
     raw_submission_record.completed_task = submission_record.completed_task
@@ -211,51 +109,22 @@ def update_submission_record(db: Session, submission_record: SubmissionRecord) -
 
 
 def register_submission_summary_recursive(
-    db: Session, submission_summary: SubmissionSummaryRecord
+    db: Session, submission_summary: records.SubmissionSummary
 ) -> None:
     CRUD_LOGGER.debug("register_submission_summary_recursiveが呼び出されました")
-    # db_submission_summary = models.SubmissionSummary()
-    # # sqlalchemyのモデルのフィールドに対応するもののみSubmissionSummaryレコードからコピーする
-    # for var, value in vars(models.SubmissionSummary).items():
-    #     if var in submission_summary.model_fields:
-    #         setattr(db_submission_summary, var, getattr(submission_summary, var))
-    db_submission_summary = models.SubmissionSummary(
-        **submission_summary.model_dump(exclude={"evaluation_summary_list"})
+    raw_submission_summary = models.SubmissionSummary(
+        **submission_summary.model_dump(exclude={"judge_results"})
     )
-    db.add(db_submission_summary)
-    db.commit()
-    db.refresh(db_submission_summary)
-
-    submission_summary_id = db_submission_summary.submission_id
-
-    for evaluation_summary in submission_summary.evaluation_summary_list:
-        evaluation_summary.parent_id = submission_summary_id
-        # db_evaluation_summary = models.EvaluationSummary()
-        # for var, value in vars(models.EvaluationSummary).items():
-        #     if var in evaluation_summary.model_fields:
-        #         setattr(db_evaluation_summary, var, getattr(evaluation_summary, var))
-        db_evaluation_summary = models.EvaluationSummary(
-            **evaluation_summary.model_dump(exclude={"judge_result_list", "ts", "id"})
+    
+    db.add(raw_submission_summary)
+    
+    for judge_result in submission_summary.judge_results:
+        raw_judge_result = models.JudgeResult(
+            **judge_result.model_dump(exclude={"id", "ts"})
         )
-        db.add(db_evaluation_summary)
-        db.commit()
-        db.refresh(db_evaluation_summary)
-        evaluation_summary_id = db_evaluation_summary.id
-
-        for judge_result in evaluation_summary.judge_result_list:
-            judge_result.parent_id = evaluation_summary_id
-            # db_judge_result = models.JudgeResult()
-            # for var, value in vars(models.JudgeResult).items():
-            #     if var in judge_result.model_fields:
-            #         setattr(db_judge_result, var, getattr(judge_result, var))
-            db_judge_result = models.JudgeResult(
-                **judge_result.model_dump(exclude={"id", "ts"})
-            )
-            db.add(db_judge_result)
-            db.commit()
-
+        db.add(raw_judge_result)
+    
     db.commit()
-
 
 # Undo処理: judge-serverをシャットダウンするときに実行する
 # 1. その時点でstatusが"running"になっているジャッジリクエスト(from Submissionテーブル)を
@@ -283,11 +152,6 @@ def undo_running_submissions(db: Session) -> None:
         models.JudgeResult.submission_id.in_(submission_id_list)
     ).delete(synchronize_session=False)
 
-    # 関連するEvaluationSummaryを一括で削除
-    db.query(models.EvaluationSummary).filter(
-        models.EvaluationSummary.submission_id.in_(submission_id_list)
-    ).delete(synchronize_session=False)
-
     # 関連するSubmissionSummaryを一括で削除
     db.query(models.SubmissionSummary).filter(
         models.SubmissionSummary.submission_id.in_(submission_id_list)
@@ -309,20 +173,26 @@ def register_judge_request(
     user_id: str,
     lecture_id: int,
     assignment_id: int,
-    for_evaluation: bool,
-) -> SubmissionRecord:
+    eval: bool,
+    
+) -> records.Submission:
     CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
         batch_id=batch_id,
         user_id=user_id,
         lecture_id=lecture_id,
         assignment_id=assignment_id,
-        for_evaluation=for_evaluation,
+        eval=eval,
     )
     db.add(new_submission)
     db.commit()
     db.refresh(new_submission)
-    return SubmissionRecord.model_validate(new_submission)
+    mapper = inspect(new_submission)
+    return records.Submission.model_validate(
+        # マッピングされたカラムのみを取り出す
+        # uploaded_filesはrelationshipであり、ここではいらないのでlazy loadingを回避する
+        **{c.key: getattr(new_submission, c.key) for c in mapper.column_attrs}
+    )
 
 
 # アップロードされたファイルをUploadedFilesに登録する
@@ -353,7 +223,7 @@ def enqueue_judge_request(db: Session, submission_id: int) -> None:
 
 
 # Submissionテーブルのジャッジリクエストのstatusを確認する
-def fetch_submission_record(db: Session, submission_id: int) -> SubmissionRecord:
+def fetch_submission_record(db: Session, submission_id: int) -> records.Submission:
     CRUD_LOGGER.debug("call fetch_judge_status")
     submission = (
         db.query(models.Submission)
@@ -362,21 +232,25 @@ def fetch_submission_record(db: Session, submission_id: int) -> SubmissionRecord
     )
     if submission is None:
         raise ValueError(f"Submission with {submission_id} not found")
-    return SubmissionRecord.model_validate(submission)
+    mapper = inspect(submission)
+    return records.Submission.model_validate(
+        # マッピングされたカラムのみを取り出す
+        # uploaded_filesはrelationshipであり、ここではいらないのでlazy loadingを回避する
+        **{c.key: getattr(submission, c.key) for c in mapper.column_attrs}
+    )
 
 
 # 特定のジャッジリクエストに紐づいたジャッジ結果を取得する
-def fetch_judge_results(db: Session, submission_id: int) -> list[JudgeResultRecord]:
-    CRUD_LOGGER.debug("call fetch_judge_result")
-    raw_judge_results = (
-        db.query(models.JudgeResult)
-        .filter(models.JudgeResult.submission_id == submission_id)
-        .all()
+def fetch_submission_summary(db: Session, submission_id: int) -> records.SubmissionSummary | None:
+    CRUD_LOGGER.debug("call fetch_submission_summary")
+    raw_submission_summary = (
+        db.query(models.SubmissionSummary)
+        .filter(models.SubmissionSummary.submission_id == submission_id)
+        .first()
     )
-    return [
-        JudgeResultRecord.model_validate(raw_result)
-        for raw_result in raw_judge_results
-    ]
+    if raw_submission_summary is None:
+        return None
+    return records.SubmissionSummary.model_validate(raw_submission_summary)
 
 
 def fetch_arranged_file_dict(
@@ -389,44 +263,3 @@ def fetch_arranged_file_dict(
     )
     return {record.str_id: record.path for record in arranged_file_records}
 
-
-def fetch_submission_summary(
-    db: Session, submission_id: int
-) -> SubmissionSummaryRecord:
-    CRUD_LOGGER.debug("fetch_submission_summaryが呼び出されました")
-    raw_submission_summary = (
-        db.query(models.SubmissionSummary)
-        .filter(models.SubmissionSummary.submission_id == submission_id)
-        .first()
-    )
-    if raw_submission_summary is None:
-        raise ValueError(f"提出 {submission_id} は完了していません")
-    submission_summary = SubmissionSummaryRecord.model_validate(raw_submission_summary)
-
-    # Goal: submission_summary.evaluation_summary_listを埋める
-
-    raw_evaluation_summary_list = (
-        db.query(models.EvaluationSummary)
-        .filter(models.EvaluationSummary.parent_id == submission_summary.submission_id)
-        .all()
-    )
-    
-    evaluation_summary_list = [
-        EvaluationSummaryRecord.model_validate(raw_evaluation_summary)
-        for raw_evaluation_summary in raw_evaluation_summary_list
-    ]
-
-    for evaluation_summary in evaluation_summary_list:
-        raw_judge_result_list = (
-            db.query(models.JudgeResult)
-            .filter(models.JudgeResult.parent_id == evaluation_summary.id)
-            .all()
-        )
-        judge_result_list = [
-            JudgeResultRecord.model_validate(raw_judge_result)
-            for raw_judge_result in raw_judge_result_list
-        ]
-        evaluation_summary.judge_result_list = judge_result_list
-        submission_summary.evaluation_summary_list.append(evaluation_summary)
-
-    return submission_summary

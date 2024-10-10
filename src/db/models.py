@@ -68,7 +68,6 @@ class RequiredFiles(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"))
     assignment_id = Column(Integer, ForeignKey("Problem.assignment_id"))
-    for_evaluation = Column(Boolean, ForeignKey("Problem.for_evaluation"))
     name = Column(String(255), nullable=False)
     problem: Problem = relationship("Problem", back_populates="required_files")
 
@@ -143,8 +142,6 @@ class BatchSubmissionSummary(Base):
     upload_dir = Column(String(255), nullable=True, default=None)
     report_path = Column(String(255), nullable=True, default=None)
     submit_date = Column(DateTime, nullable=True, default=None)
-    
-    submissions: list["Submission"] = relationship("Submission")
 
 
 class Submission(Base):
@@ -159,7 +156,7 @@ class Submission(Base):
     progress = Column(Enum("pending", "queued", "running", "done"), default="pending")
     total_task = Column(Integer, nullable=False, default=0)
     completed_task = Column(Integer, nullable=False, default=0)
-    
+
     uploaded_files: list["UploadedFiles"] = relationship("UploadedFiles")
 
 
