@@ -77,9 +77,17 @@ def fetch_problem(
             )
             .first()
         )
-        
+
         # ここで、lazy loadingにより、executables, arranged_files, required_files, test_casesが埋まる
-        return records.Problem.model_validate(problem)
+        problem_record = records.Problem.model_validate(problem)
+        
+        if eval is False:
+            # eval == Falseの場合は、評価用のテストケースを除く
+            problem_record.test_cases = [
+                testcase for testcase in problem_record.test_cases if not testcase.eval
+            ]
+        
+        return problem_record
     except Exception as e:
         CRUD_LOGGER.error(f"fetch_problemでエラーが発生しました: {str(e)}")
         return None

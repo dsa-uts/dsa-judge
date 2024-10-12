@@ -1,10 +1,11 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import datetime
 from concurrent.futures import ThreadPoolExecutor, Future
 import asyncio
 from db.crud import *
 from db.models import *
+from db import records
 from db.database import SessionLocal
 from sandbox.my_error import Error
 from judge import JudgeInfo
@@ -41,8 +42,8 @@ class WorkerPool:
     
 worker_pool = WorkerPool(max_workers=50)
 
-def process_one_judge_request(submission: SubmissionRecord) -> Error:
-    judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, for_evaluation={submission.for_evaluation}) will be created...")
+def process_one_judge_request(submission: records.Submission) -> Error:
+    judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, for_evaluation={submission.eval}) will be created...")
     judge_info = JudgeInfo(submission)
     judge_logger.debug("START JUDGE...")
     err = judge_info.judge()
