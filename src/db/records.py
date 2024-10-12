@@ -176,6 +176,11 @@ class TestCases(BaseModel):
     description: str | None
     message_on_fail: str | None
     command: str
+    args: str | None
+    stdin_path: str | None
+    stdout_path: str | None
+    stderr_path: str | None
+    exit_code: int
     
     model_config = {
         "from_attributes": True
@@ -252,8 +257,8 @@ class SubmissionSummary(BaseModel):
 
 
 class JudgeResult(BaseModel):
-    id: int
-    ts: datetime
+    id: int = Field(default=0)
+    ts: datetime = Field(default=datetime(year=1998, month=6, day=6))
     submission_id: int
     testcase_id: int
     result: SingleJudgeStatus

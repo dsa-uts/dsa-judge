@@ -84,7 +84,7 @@ class TestCases(Base):
     description = Column(String)
     message_on_fail = Column(String(255))
     command = Column(String(255), nullable=False)
-    argument_path = Column(String(255))
+    args = Column(String(255))
     stdin_path = Column(String(255))
     stdout_path = Column(String(255))
     stderr_path = Column(String(255))
