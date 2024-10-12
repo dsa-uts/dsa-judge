@@ -29,6 +29,10 @@ class JudgeInfo:
         self.submission_record = submission
 
         with SessionLocal() as db:
+            
+            # self.submission_record.uploaded_filesは自動で取得しないので、
+            # ここで取得する    
+            self.submission_record.uploaded_files = crud.fetch_uploaded_files(db=db, submission_id=self.submission_record.id)
 
             problem_record = crud.fetch_problem(
                 db=db,

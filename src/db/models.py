@@ -1,5 +1,4 @@
 from sqlalchemy import (
-    Column,
     Integer,
     String,
     Boolean,
@@ -8,195 +7,234 @@ from sqlalchemy import (
     text,
     ForeignKey,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import (
+    relationship, Mapped, DeclarativeBase, mapped_column
+)
+from typing import List
+from datetime import datetime
 
-from .database import Base
-
+class Base(DeclarativeBase):
+    pass
 
 class Lecture(Base):
     __tablename__ = "Lecture"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    title = Column(String(255), nullable=False)
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     
     # Lectureレコードと1-N関係にあるProblemレコードへの参照
-    problems: list["Problem"] = relationship("Problem", back_populates="lecture")
+    problems: Mapped[List["Problem"]] = relationship(back_populates="lecture")
 
 
 class Problem(Base):
     __tablename__ = "Problem"
-    lecture_id = Column(
+    lecture_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("Lecture.id"), primary_key=True, nullable=False
     )
-    assignment_id = Column(Integer, primary_key=True, nullable=False)
-    title = Column(String(255), nullable=False)
-    description_path = Column(String(255), nullable=False)
-    timeMS = Column(Integer, nullable=False)
-    memoryMB = Column(Integer, nullable=False)
+    assignment_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    timeMS: Mapped[int] = mapped_column(Integer, nullable=False)
+    memoryMB: Mapped[int] = mapped_column(Integer, nullable=False)
     
     # Problemレコードと1-NまたはN-1関係にあるレコードへの参照
-    lecture: Lecture = relationship("Lecture", back_populates="problems")
-    executables: list["Executables"] = relationship("Executables", back_populates="problem")
-    arranged_files: list["ArrangedFiles"] = relationship("ArrangedFiles", back_populates="problem")
-    required_files: list["RequiredFiles"] = relationship("RequiredFiles", back_populates="problem")
-    test_cases: list["TestCases"] = relationship("TestCases", back_populates="problem")
+    lecture: Mapped["Lecture"] = relationship(back_populates="problems")
+    # 複合Primaryキーや複合Foreignキーを使用している場合、primaryjoinを指定しないと
+    # relationshipが機能しないため、primaryjoinを指定する
+    executables: Mapped[List["Executables"]] = relationship(back_populates="problem", 
+                                                            primaryjoin=(
+                                                                "and_(Problem.lecture_id == Executables.lecture_id, "
+                                                                "Problem.assignment_id == Executables.assignment_id)"
+                                                            ))
+    arranged_files: Mapped[List["ArrangedFiles"]] = relationship(back_populates="problem", 
+                                                                primaryjoin=(
+                                                                    "and_(Problem.lecture_id == ArrangedFiles.lecture_id, "
+                                                                    "Problem.assignment_id == ArrangedFiles.assignment_id)"
+                                                                ))
+    required_files: Mapped[List["RequiredFiles"]] = relationship(back_populates="problem", 
+                                                                primaryjoin=(
+                                                                    "and_(Problem.lecture_id == RequiredFiles.lecture_id, "
+                                                                    "Problem.assignment_id == RequiredFiles.assignment_id)"
+                                                                ))
+    test_cases: Mapped[List["TestCases"]] = relationship(back_populates="problem", 
+                                                        primaryjoin=(
+                                                            "and_(Problem.lecture_id == TestCases.lecture_id, "
+                                                            "Problem.assignment_id == TestCases.assignment_id)"
+                                                        ))
 
 
 class Executables(Base):
     __tablename__ = "Executables"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"))
-    assignment_id = Column(Integer, ForeignKey("Problem.assignment_id"))
-    eval = Column(Boolean, default=False)
-    name = Column(String(255), nullable=False)
-    problem: Problem = relationship("Problem", back_populates="executables")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"))
+    assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"))
+    eval: Mapped[bool] = mapped_column(Boolean, default=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    problem: Mapped["Problem"] = relationship(back_populates="executables", 
+                                                primaryjoin=(
+                                                    "and_(Problem.lecture_id == Executables.lecture_id, "
+                                                    "Problem.assignment_id == Executables.assignment_id)"
+                                                ),
+                                                foreign_keys=[lecture_id, assignment_id]
+                                                )
 
 
 class ArrangedFiles(Base):
     __tablename__ = "ArrangedFiles"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"))
-    assignment_id = Column(Integer, ForeignKey("Problem.assignment_id"))
-    eval = Column(Boolean, default=False)
-    path = Column(String(255), nullable=False)
-    problem: Problem = relationship("Problem", back_populates="arranged_files")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"))
+    assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"))
+    eval: Mapped[bool] = mapped_column(Boolean, default=False)
+    path: Mapped[str] = mapped_column(String(255), nullable=False)
+    problem: Mapped["Problem"] = relationship(back_populates="arranged_files", 
+                                                primaryjoin=(
+                                                    "and_(Problem.lecture_id == ArrangedFiles.lecture_id, "
+                                                    "Problem.assignment_id == ArrangedFiles.assignment_id)"
+                                                ),
+                                                foreign_keys=[lecture_id, assignment_id]
+                                                )
 
 
 class RequiredFiles(Base):
     __tablename__ = "RequiredFiles"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"))
-    assignment_id = Column(Integer, ForeignKey("Problem.assignment_id"))
-    name = Column(String(255), nullable=False)
-    problem: Problem = relationship("Problem", back_populates="required_files")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"))
+    assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    problem: Mapped["Problem"] = relationship(back_populates="required_files", 
+                                                primaryjoin=(
+                                                    "and_(Problem.lecture_id == RequiredFiles.lecture_id, "
+                                                    "Problem.assignment_id == RequiredFiles.assignment_id)"
+                                                ),
+                                                foreign_keys=[lecture_id, assignment_id]
+                                                )
 
 
 class TestCases(Base):
     __tablename__ = "TestCases"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"))
-    assignment_id = Column(Integer, ForeignKey("Problem.assignment_id"))
-    eval = Column(Boolean, default=False)
-    type = Column(Enum("Built", "Judge"), nullable=False)
-    score = Column(Integer, nullable=False)
-    title = Column(String(255), nullable=False)
-    description = Column(String)
-    message_on_fail = Column(String(255))
-    command = Column(String(255), nullable=False)
-    args = Column(String(255))
-    stdin_path = Column(String(255))
-    stdout_path = Column(String(255))
-    stderr_path = Column(String(255))
-    exit_code = Column(Integer, nullable=False, default=0)
-    problem: Problem = relationship("Problem", back_populates="test_cases")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"))
+    assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"))
+    eval: Mapped[bool] = mapped_column(Boolean, default=False)
+    type: Mapped[str] = mapped_column(Enum("Built", "Judge"), nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String)
+    message_on_fail: Mapped[str] = mapped_column(String(255))
+    command: Mapped[str] = mapped_column(String(255), nullable=False)
+    args: Mapped[str] = mapped_column(String(255))
+    stdin_path: Mapped[str] = mapped_column(String(255))
+    stdout_path: Mapped[str] = mapped_column(String(255))
+    stderr_path: Mapped[str] = mapped_column(String(255))
+    exit_code: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    problem: Mapped["Problem"] = relationship(back_populates="test_cases", 
+                                                primaryjoin=(
+                                                    "and_(Problem.lecture_id == TestCases.lecture_id, "
+                                                    "Problem.assignment_id == TestCases.assignment_id)"
+                                                ),
+                                                foreign_keys=[lecture_id, assignment_id]
+                                                )
 
 
 class Users(Base):
     __tablename__ = "Users"
-    user_id = Column(String(255), primary_key=True)
-    username = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=False)
-    hashed_password = Column(String(255), nullable=False)
-    role = Column(Enum("admin", "manager", "student"), nullable=False)
-    disabled = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(
+    user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(Enum("admin", "manager", "student"), nullable=False)
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
         onupdate=text("CURRENT_TIMESTAMP"),
     )
-    active_start_date = Column(DateTime, nullable=False)
-    active_end_date = Column(DateTime, nullable=False)
+    active_start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    active_end_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class LoginHistory(Base):
     __tablename__ = "LoginHistory"
-    user_id = Column(
+    user_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("Users.user_id"), primary_key=True, nullable=False
     )
-    login_at = Column(DateTime, nullable=False, primary_key=True)
-    logout_at = Column(DateTime, nullable=False)
-    refresh_count = Column(Integer, default=0, nullable=False)
-    
-    user_info: Users = relationship("Users")
+    login_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, primary_key=True)
+    logout_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    refresh_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class BatchSubmission(Base):
     __tablename__ = "BatchSubmission"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    user_id = Column(String(255), ForeignKey("Users.user_id"))
-    lecture_id = Column(Integer, ForeignKey("Lecture.id"), nullable=False)
-    message = Column(String(255), nullable=True)
-    complete_judge = Column(Integer, nullable=True)
-    total_judge = Column(Integer, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"))
+    lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Lecture.id"), nullable=False)
+    message: Mapped[str] = mapped_column(String(255), nullable=True)
+    complete_judge: Mapped[int] = mapped_column(Integer, nullable=True)
+    total_judge: Mapped[int] = mapped_column(Integer, nullable=True)
 
 
 class BatchSubmissionSummary(Base):
     __tablename__ = "BatchSubmissionSummary"
-    batch_id = Column(Integer, ForeignKey("BatchSubmission.id"), primary_key=True)
-    user_id = Column(String(255), ForeignKey("Users.user_id"), primary_key=True)
-    status = Column(Enum("submitted", "delay", "non-submitted"), nullable=False)
-    result = Column(Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=True, default=None)
-    upload_dir = Column(String(255), nullable=True, default=None)
-    report_path = Column(String(255), nullable=True, default=None)
-    submit_date = Column(DateTime, nullable=True, default=None)
+    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), primary_key=True)
+    status: Mapped[str] = mapped_column(Enum("submitted", "delay", "non-submitted"), nullable=False)
+    result: Mapped[str] = mapped_column(Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=True, default=None)
+    upload_dir: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
+    report_path: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
+    submit_date: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
 
 
 class Submission(Base):
     __tablename__ = "Submission"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    batch_id = Column(Integer, ForeignKey("BatchSubmission.id"), default=None)
-    user_id = Column(String(255), ForeignKey("Users.user_id"), nullable=False)
-    lecture_id = Column(Integer, ForeignKey("Problem.lecture_id"), nullable=False)
-    assignment_id = Column(Integer, ForeignKey("Problem.assignment_id"), nullable=False)
-    eval = Column(Boolean, nullable=False)
-    progress = Column(Enum("pending", "queued", "running", "done"), default="pending")
-    total_task = Column(Integer, nullable=False, default=0)
-    completed_task = Column(Integer, nullable=False, default=0)
-
-    uploaded_files: list["UploadedFiles"] = relationship("UploadedFiles")
+    id: Mapped[int] = mapped_column(Integer,primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), default=None)
+    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False)
+    lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"), nullable=False)
+    assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"), nullable=False)
+    eval: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    progress: Mapped[str] = mapped_column(Enum("pending", "queued", "running", "done"), default="pending")
+    total_task: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_task: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class UploadedFiles(Base):
     __tablename__ = "UploadedFiles"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    submission_id = Column(Integer, ForeignKey("Submission.id"))
-    path = Column(String(255), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    submission_id: Mapped[int] = mapped_column(ForeignKey("Submission.id"))
+    path: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
 class SubmissionSummary(Base):
     __tablename__ = "SubmissionSummary"
-    submission_id = Column(Integer, ForeignKey("Submission.id"), primary_key=True)
-    batch_id = Column(Integer, ForeignKey("BatchSubmission.id"), default=None)
-    user_id = Column(String(255), ForeignKey("Users.user_id"), nullable=False)
-    result = Column(
+    submission_id: Mapped[int] = mapped_column(Integer, ForeignKey("Submission.id"), primary_key=True)
+    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), default=None)
+    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False)
+    result: Mapped[str] = mapped_column(
         Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=False
     )
-    message = Column(String(255))
-    detail = Column(String(255))
-    score = Column(Integer, nullable=False)
-    timeMS = Column(Integer, nullable=False, default=0)
-    memoryKB = Column(Integer, nullable=False, default=0)
-    
-    judge_results: list["JudgeResult"] = relationship("JudgeResult")
+    message: Mapped[str] = mapped_column(String(255))
+    detail: Mapped[str] = mapped_column(String(255))
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    timeMS: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    memoryKB: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class JudgeResult(Base):
     __tablename__ = "JudgeResult"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ts = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    submission_id = Column(Integer, ForeignKey("Submission.id"), nullable=False)
-    testcase_id = Column(Integer, ForeignKey("TestCases.id"), nullable=False)
-    result = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    submission_id: Mapped[int] = mapped_column(Integer, ForeignKey("SubmissionSummary.submission_id"), nullable=False)
+    testcase_id: Mapped[int] = mapped_column(Integer, ForeignKey("TestCases.id"), nullable=False)
+    result: Mapped[str] = mapped_column(
         Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE"), nullable=False
     )
-    timeMS = Column(Integer, nullable=False)
-    memoryKB = Column(Integer, nullable=False)
-    exit_code = Column(Integer, nullable=False)
-    stdout = Column(String, nullable=False)
-    stderr = Column(String, nullable=False)
-
+    timeMS: Mapped[int] = mapped_column(Integer, nullable=False)
+    memoryKB: Mapped[int] = mapped_column(Integer, nullable=False)
+    exit_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    stdout: Mapped[str] = mapped_column(String, nullable=False)
+    stderr: Mapped[str] = mapped_column(String, nullable=False)

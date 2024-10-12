@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from pprint import pp
 from sqlalchemy import inspect
+from datetime import datetime, timedelta
 
 from db import models, records
 
@@ -27,6 +28,7 @@ def fetch_queued_judge_and_change_status_to_running(
     CRUD_LOGGER.debug("fetch_queued_judgeが呼び出されました")
     try:
         # FOR UPDATE NOWAITを使用して排他的にロックを取得
+        # CRUD_LOGGER.debug("FOR UPDATE NOWAITを使用して排他的にロックを取得")
         submission_list = (
             db.query(models.Submission)
             .filter(models.Submission.progress == "queued")
@@ -34,10 +36,12 @@ def fetch_queued_judge_and_change_status_to_running(
             .limit(n)
             .all()
         )
+        # CRUD_LOGGER.debug(f"取得したSubmissionの数: {len(submission_list)}")
 
         for submission in submission_list:
             submission.progress = "running"
             # total_task（実行しなければならないTestCaseの数）を求める
+            # CRUD_LOGGER.debug(f"total_taskを求めるためにTestCasesテーブルをクエリ")
             submission_total_task = (
                 db.query(models.TestCases)
                 .filter(models.TestCases.lecture_id == submission.lecture_id, 
@@ -46,6 +50,7 @@ def fetch_queued_judge_and_change_status_to_running(
                         (models.TestCases.eval == submission.eval) | (models.TestCases.eval == False))
                 .count()
             )
+            # CRUD_LOGGER.debug(f"total_task: {submission_total_task}")
             submission.total_task = submission_total_task
             submission.completed_task = 0
 
@@ -84,7 +89,7 @@ def fetch_problem(
         if eval is False:
             # eval == Falseの場合は、評価用のテストケースを除く
             problem_record.test_cases = [
-                testcase for testcase in problem_record.test_cases if not testcase.eval
+                testcase for testcase in problem_record.test_cases if testcase.eval == False
             ]
         
         return problem_record
@@ -125,6 +130,9 @@ def register_submission_summary_recursive(
     )
     
     db.add(raw_submission_summary)
+    # ここでコミットしないと、judge_resultsのsubmission_id(SubmissionSummary.submission_idを指すFK)
+    # の参照先が定まらないため、以降の処理でエラーが発生する
+    db.commit()
     
     for judge_result in submission_summary.judge_results:
         raw_judge_result = models.JudgeResult(
@@ -169,6 +177,11 @@ def undo_running_submissions(db: Session) -> None:
     db.commit()
 
 
+def fetch_uploaded_files(db: Session, submission_id: int) -> list[records.UploadedFiles]:
+    raw_uploaded_files = db.query(models.UploadedFiles).filter(models.UploadedFiles.submission_id == submission_id).all()
+    return [records.UploadedFiles.model_validate(uploaded_file) for uploaded_file in raw_uploaded_files]
+
+
 # ----------------------- end --------------------------------------------------
 
 # ---------------- for client server -------------------------------------------
@@ -182,7 +195,6 @@ def register_judge_request(
     lecture_id: int,
     assignment_id: int,
     eval: bool,
-    
 ) -> records.Submission:
     CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
@@ -195,12 +207,7 @@ def register_judge_request(
     db.add(new_submission)
     db.commit()
     db.refresh(new_submission)
-    mapper = inspect(new_submission)
-    return records.Submission.model_validate(
-        # マッピングされたカラムのみを取り出す
-        # uploaded_filesはrelationshipであり、ここではいらないのでlazy loadingを回避する
-        **{c.key: getattr(new_submission, c.key) for c in mapper.column_attrs}
-    )
+    return records.Submission.model_validate(new_submission)
 
 
 # アップロードされたファイルをUploadedFilesに登録する
@@ -240,16 +247,13 @@ def fetch_submission_record(db: Session, submission_id: int) -> records.Submissi
     )
     if submission is None:
         raise ValueError(f"Submission with {submission_id} not found")
-    mapper = inspect(submission)
-    return records.Submission.model_validate(
-        # マッピングされたカラムのみを取り出す
-        # uploaded_filesはrelationshipであり、ここではいらないのでlazy loadingを回避する
-        **{c.key: getattr(submission, c.key) for c in mapper.column_attrs}
-    )
+    return records.Submission.model_validate(submission)
 
 
 # 特定のジャッジリクエストに紐づいたジャッジ結果を取得する
-def fetch_submission_summary(db: Session, submission_id: int) -> records.SubmissionSummary | None:
+def fetch_submission_summary(
+    db: Session, submission_id: int, detail: bool = False
+) -> records.SubmissionSummary | None:
     CRUD_LOGGER.debug("call fetch_submission_summary")
     raw_submission_summary = (
         db.query(models.SubmissionSummary)
@@ -258,16 +262,40 @@ def fetch_submission_summary(db: Session, submission_id: int) -> records.Submiss
     )
     if raw_submission_summary is None:
         return None
-    return records.SubmissionSummary.model_validate(raw_submission_summary)
+    submission_summary = records.SubmissionSummary.model_validate(raw_submission_summary)
+    if detail is True:
+        judge_results = (
+            db.query(models.JudgeResult)
+            .filter(models.JudgeResult.submission_id == submission_id)
+            .all()
+        )
+        submission_summary.judge_results = [records.JudgeResult.model_validate(judge_result) for judge_result in judge_results]
+    return submission_summary
 
 
-def fetch_arranged_file_dict(
-    db: Session, arranged_file_id_list: list[str]
-) -> dict[str, str]:
-    arranged_file_records = (
-        db.query(models.ArrangedFiles)
-        .filter(models.ArrangedFiles.str_id.in_(arranged_file_id_list))
-        .all()
+def create_user(db: Session, user_id: str) -> None:
+    '''
+    テストコードのためだけのメソッド
+    '''
+    new_user = models.Users(
+        user_id=user_id,
+        username="test",
+        email="test@test.com",
+        hashed_password="test",
+        role="student",
+        disabled=False,
+        active_start_date=datetime.now(),
+        active_end_date=datetime.now() + timedelta(days=365),
     )
-    return {record.str_id: record.path for record in arranged_file_records}
+    db.add(new_user)
+    db.commit()
 
+def delete_user(db: Session, user_id: str) -> None:
+    '''
+    テストコードのためだけのメソッド
+    '''
+    db.query(models.Users).filter(models.Users.user_id == user_id).delete()
+    db.commit()
+
+def user_exists(db: Session, user_id: str) -> bool:
+    return db.query(models.Users).filter(models.Users.user_id == user_id).first() is not None

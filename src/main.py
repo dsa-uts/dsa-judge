@@ -43,7 +43,7 @@ class WorkerPool:
 worker_pool = WorkerPool(max_workers=50)
 
 def process_one_judge_request(submission: records.Submission) -> Error:
-    judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, for_evaluation={submission.eval}) will be created...")
+    judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, eval={submission.eval}) will be created...")
     judge_info = JudgeInfo(submission)
     judge_logger.debug("START JUDGE...")
     err = judge_info.judge()
