@@ -63,17 +63,6 @@ class SingleJudgeStatus(BaseJudgeStatusWithOrder):
     IE = "IE"  # Internal Error (e.g., docker sandbox management)
 
 
-class EvaluationSummaryStatus(BaseJudgeStatusWithOrder):
-    AC = "AC"  # Accepted
-    WA = "WA"  # Wrong Answer
-    TLE = "TLE"  # Time Limit Exceed
-    MLE = "MLE"  # Memory Limit Exceed
-    RE = "RE"  # Runtime Error
-    CE = "CE"  # Compile Error
-    OLE = "OLE"  # Output Limit Exceed (8000 bytes)
-    IE = "IE"  # Internal Error (e.g., docker sandbox management)
-
-
 class SubmissionSummaryStatus(BaseJudgeStatusWithOrder):
     AC = "AC"  # Accepted
     WA = "WA"  # Wrong Answer
