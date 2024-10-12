@@ -1,16 +1,10 @@
 from pathlib import Path
-from dataclasses import dataclass, field
 from sandbox.execute import Volume
 from sandbox.my_error import Error
 from sandbox.execute import TaskInfo
 from sandbox.execute import VolumeMountInfo
-from sqlalchemy.orm import Session
-from sandbox.execute import TaskResult
 from dotenv import load_dotenv
 from db import records, crud
-from db.models import TestCases, Problem
-import logging
-from db.crud import *
 from db.database import SessionLocal
 from checker import StandardChecker
 import os
@@ -36,7 +30,7 @@ class JudgeInfo:
 
         with SessionLocal() as db:
 
-            problem_record = fetch_problem(
+            problem_record = crud.fetch_problem(
                 db=db,
                 lecture_id=self.submission_record.lecture_id,
                 assignment_id=self.submission_record.assignment_id,
@@ -59,8 +53,8 @@ class JudgeInfo:
                     score=0
                 )
 
-                register_submission_summary_recursive(db=db, submission_summary=submission_summary)
-                update_submission_record(db=db, submission_record=self.submission_record)
+                crud.register_submission_summary_recursive(db=db, submission_summary=submission_summary)
+                crud.update_submission_record(db=db, submission_record=self.submission_record)
                 raise ValueError(message)
             else:
                 self.problem_record = problem_record
@@ -89,7 +83,7 @@ class JudgeInfo:
     def _update_progress_of_submission(self, completed_task: int) -> None:
         self.submission_record.completed_task = completed_task
         with SessionLocal() as db:
-            update_submission_record(db=db, submission_record=self.submission_record)
+            crud.update_submission_record(db=db, submission_record=self.submission_record)
 
     def _exec_built_task(
         self,
@@ -261,12 +255,12 @@ class JudgeInfo:
     def _closing_procedure(self, submission_summary: records.SubmissionSummary, working_volume: Volume | None) -> Error:
         # SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
         with SessionLocal() as db:
-            register_submission_summary_recursive(
+            crud.register_submission_summary_recursive(
                 db=db,
                 submission_summary=submission_summary
             )
             self.submission_record.progress = records.SubmissionProgressStatus.DONE
-            update_submission_record(
+            crud.update_submission_record(
                 db=db,
                 submission_record=self.submission_record
             )
@@ -279,7 +273,6 @@ class JudgeInfo:
 
         return Error.Nothing()
 
-    # TODO ここから
     def judge(self) -> Error:
         # testcase_id(key) -> TestCaseのdict
         testcase_dict: dict[int, records.TestCases] = {}
