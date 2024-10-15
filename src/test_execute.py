@@ -475,7 +475,7 @@ def test_submit_judge():
         # ジャッジリクエストを登録
         submission = register_judge_request(
             db=db,
-            batch_id=None,
+            evaluation_status_id=None,
             user_id="test_user",
             lecture_id=1,
             assignment_id=1,
@@ -514,9 +514,9 @@ def test_submit_judge():
     
     # 結果を取得する
     with SessionLocal() as db:
-        submission_summary = fetch_submission_summary(db=db, submission_id=submission.id, detail=True)
+        submission_record = fetch_submission_record(db=db, submission_id=submission.id)
         
     test_logger.info(f"entire summary:")
-    test_logger.info(submission_summary.model_dump_json(indent=2))
+    test_logger.info(submission_record.model_dump_json(indent=2))
     
     # delete_user(db=db, user_id="test_user")

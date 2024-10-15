@@ -110,37 +110,21 @@ def update_submission_record(db: Session, submission_record: records.Submission)
     if raw_submission_record is None:
         raise ValueError(f"Submission with id {submission_record.id} not found")
 
-    # assert raw_submission_record.batch_id == submission_record.batch_id
+    # assert raw_submission_record.evaluation_status_id == submission_record.evaluation_status_id
     # assert raw_submission_record.user_id == submission_record.user_id
     # assert raw_submission_record.lecture_id == submission_record.lecture_id
     # assert raw_submission_record.assignment_id == submission_record.assignment_id
     # assert raw_submission_record.eval == submission_record.eval
-    raw_submission_record.progress = submission_record.progress.value
-    raw_submission_record.total_task = submission_record.total_task
-    raw_submission_record.completed_task = submission_record.completed_task
+    for attr, value in submission_record.model_dump(exclude={"judge_results", "uploaded_files"}).items():
+        setattr(raw_submission_record, attr, value)
     db.commit()
 
+    for judge_result in submission_record.judge_results:
+        db.add(models.JudgeResult(
+            **judge_result.model_dump(exclude={"id"})
+        ))
+    db.commit()
 
-def register_submission_summary_recursive(
-    db: Session, submission_summary: records.SubmissionSummary
-) -> None:
-    CRUD_LOGGER.debug("register_submission_summary_recursiveが呼び出されました")
-    raw_submission_summary = models.SubmissionSummary(
-        **submission_summary.model_dump(exclude={"judge_results"})
-    )
-    
-    db.add(raw_submission_summary)
-    # ここでコミットしないと、judge_resultsのsubmission_id(SubmissionSummary.submission_idを指すFK)
-    # の参照先が定まらないため、以降の処理でエラーが発生する
-    db.commit()
-    
-    for judge_result in submission_summary.judge_results:
-        raw_judge_result = models.JudgeResult(
-            **judge_result.model_dump(exclude={"id", "ts"})
-        )
-        db.add(raw_judge_result)
-    
-    db.commit()
 
 # Undo処理: judge-serverをシャットダウンするときに実行する
 # 1. その時点でstatusが"running"になっているジャッジリクエスト(from Submissionテーブル)を
@@ -160,17 +144,13 @@ def undo_running_submissions(db: Session) -> None:
     # すべてのrunning submissionのstatusを"queued"に変更
     for submission in running_submissions:
         submission.progress = "queued"
+        submission.completed_task = 0
 
     db.commit()
 
     # 関連するJudgeResultを一括で削除
     db.query(models.JudgeResult).filter(
         models.JudgeResult.submission_id.in_(submission_id_list)
-    ).delete(synchronize_session=False)
-
-    # 関連するSubmissionSummaryを一括で削除
-    db.query(models.SubmissionSummary).filter(
-        models.SubmissionSummary.submission_id.in_(submission_id_list)
     ).delete(synchronize_session=False)
 
     # 変更をコミット
@@ -190,7 +170,7 @@ def fetch_uploaded_files(db: Session, submission_id: int) -> list[records.Upload
 # Submissionテーブルにジャッジリクエストを追加する
 def register_judge_request(
     db: Session,
-    batch_id: int | None,
+    evaluation_status_id: int | None,
     user_id: str,
     lecture_id: int,
     assignment_id: int,
@@ -198,7 +178,7 @@ def register_judge_request(
 ) -> records.Submission:
     CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
-        batch_id=batch_id,
+        evaluation_status_id=evaluation_status_id,
         user_id=user_id,
         lecture_id=lecture_id,
         assignment_id=assignment_id,
@@ -248,29 +228,6 @@ def fetch_submission_record(db: Session, submission_id: int) -> records.Submissi
     if submission is None:
         raise ValueError(f"Submission with {submission_id} not found")
     return records.Submission.model_validate(submission)
-
-
-# 特定のジャッジリクエストに紐づいたジャッジ結果を取得する
-def fetch_submission_summary(
-    db: Session, submission_id: int, detail: bool = False
-) -> records.SubmissionSummary | None:
-    CRUD_LOGGER.debug("call fetch_submission_summary")
-    raw_submission_summary = (
-        db.query(models.SubmissionSummary)
-        .filter(models.SubmissionSummary.submission_id == submission_id)
-        .first()
-    )
-    if raw_submission_summary is None:
-        return None
-    submission_summary = records.SubmissionSummary.model_validate(raw_submission_summary)
-    if detail is True:
-        judge_results = (
-            db.query(models.JudgeResult)
-            .filter(models.JudgeResult.submission_id == submission_id)
-            .all()
-        )
-        submission_summary.judge_results = [records.JudgeResult.model_validate(judge_result) for judge_result in judge_results]
-    return submission_summary
 
 
 def create_user(db: Session, user_id: str) -> None:

@@ -174,24 +174,31 @@ class BatchSubmission(Base):
     message: Mapped[str] = mapped_column(String(255), nullable=True)
     complete_judge: Mapped[int] = mapped_column(Integer, nullable=True)
     total_judge: Mapped[int] = mapped_column(Integer, nullable=True)
+    
+    # BatchSubmissionレコードと1-N関係にあるEvaluationStatusレコードへの参照
+    evaluation_statuses: Mapped[List["EvaluationStatus"]] = relationship()
 
 
-class BatchSubmissionSummary(Base):
-    __tablename__ = "BatchSubmissionSummary"
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), primary_key=True)
+class EvaluationStatus(Base):
+    __tablename__ = "EvaluationStatus"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False)
     status: Mapped[str] = mapped_column(Enum("submitted", "delay", "non-submitted"), nullable=False)
     result: Mapped[str] = mapped_column(Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=True, default=None)
     upload_dir: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
     report_path: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
     submit_date: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
+    
+    # EvaluationStatusレコードと1-N関係にあるSubmissionレコードへの参照
+    submissions: Mapped[List["Submission"]] = relationship()
 
 
 class Submission(Base):
     __tablename__ = "Submission"
     id: Mapped[int] = mapped_column(Integer,primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), default=None)
+    evaluation_status_id: Mapped[int] = mapped_column(Integer, ForeignKey("EvaluationStatus.id"), default=None)
     user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False)
     lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"), nullable=False)
     assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"), nullable=False)
@@ -199,36 +206,35 @@ class Submission(Base):
     progress: Mapped[str] = mapped_column(Enum("pending", "queued", "running", "done"), default="pending")
     total_task: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_task: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    result: Mapped[str] = mapped_column(Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=True, default=None)
+    message: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
+    detail: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
+    score: Mapped[int] = mapped_column(Integer, nullable=True, default=None)
+    timeMS: Mapped[int] = mapped_column(Integer, nullable=True, default=None)
+    memoryKB: Mapped[int] = mapped_column(Integer, nullable=True, default=None)
+    
+    # Submissionレコードと1-1関係(他方から見たら1-N関係)にあるProblemレコードへの参照
+    problem: Mapped["Problem"] = relationship(
+        primaryjoin="and_(Submission.lecture_id == Problem.lecture_id, Submission.assignment_id == Problem.assignment_id)"
+    )
+    
+    # Submissionレコードと1-N関係にあるUploadedFilesレコードへの参照
+    uploaded_files: Mapped[List["UploadedFiles"]] = relationship()
+    # Submissionレコードと1-N関係にあるJudgeResultレコードへの参照
+    judge_results: Mapped[List["JudgeResult"]] = relationship()
 
 
 class UploadedFiles(Base):
     __tablename__ = "UploadedFiles"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
     submission_id: Mapped[int] = mapped_column(ForeignKey("Submission.id"))
     path: Mapped[str] = mapped_column(String(255), nullable=False)
-
-
-class SubmissionSummary(Base):
-    __tablename__ = "SubmissionSummary"
-    submission_id: Mapped[int] = mapped_column(Integer, ForeignKey("Submission.id"), primary_key=True)
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), default=None)
-    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False)
-    result: Mapped[str] = mapped_column(
-        Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=False
-    )
-    message: Mapped[str] = mapped_column(String(255))
-    detail: Mapped[str] = mapped_column(String(255))
-    score: Mapped[int] = mapped_column(Integer, nullable=False)
-    timeMS: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    memoryKB: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class JudgeResult(Base):
     __tablename__ = "JudgeResult"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ts: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
-    submission_id: Mapped[int] = mapped_column(Integer, ForeignKey("SubmissionSummary.submission_id"), nullable=False)
+    submission_id: Mapped[int] = mapped_column(Integer, ForeignKey("Submission.id"), nullable=False)
     testcase_id: Mapped[int] = mapped_column(Integer, ForeignKey("TestCases.id"), nullable=False)
     result: Mapped[str] = mapped_column(
         Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE"), nullable=False
@@ -238,3 +244,5 @@ class JudgeResult(Base):
     exit_code: Mapped[int] = mapped_column(Integer, nullable=False)
     stdout: Mapped[str] = mapped_column(String, nullable=False)
     stderr: Mapped[str] = mapped_column(String, nullable=False)
+    
+    testcase: Mapped["TestCases"] = relationship()
