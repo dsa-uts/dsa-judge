@@ -176,7 +176,7 @@ class BatchSubmission(Base):
     total_judge: Mapped[int] = mapped_column(Integer, nullable=True)
     
     # BatchSubmissionレコードと1-N関係にあるEvaluationStatusレコードへの参照
-    evaluation_statuses: Mapped[List["EvaluationStatus"]] = relationship()
+    evaluation_statuses: Mapped[List["EvaluationStatus"]] = relationship(back_populates="batch_submission")
 
 
 class EvaluationStatus(Base):
@@ -189,6 +189,8 @@ class EvaluationStatus(Base):
     upload_dir: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
     report_path: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
     submit_date: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
+    
+    batch_submission: Mapped["BatchSubmission"] = relationship(back_populates="evaluation_statuses")
     
     # EvaluationStatusレコードと1-N関係にあるSubmissionレコードへの参照
     submissions: Mapped[List["Submission"]] = relationship()
