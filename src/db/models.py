@@ -183,7 +183,7 @@ class EvaluationStatus(Base):
     __tablename__ = "EvaluationStatus"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("BatchSubmission.id"), nullable=False)
-    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("Users.user_id"), nullable=False) # 採点対象の学生のID
     status: Mapped[str] = mapped_column(Enum("submitted", "delay", "non-submitted"), nullable=False)
     result: Mapped[str] = mapped_column(Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE", "FN"), nullable=True, default=None)
     upload_dir: Mapped[str] = mapped_column(String(255), nullable=True, default=None)
