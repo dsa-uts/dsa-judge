@@ -237,6 +237,7 @@ class JudgeResult(BaseModel):
     submission_id: int
     testcase_id: int
     result: SingleJudgeStatus
+    command: str
     timeMS: int
     memoryKB: int
     exit_code: int

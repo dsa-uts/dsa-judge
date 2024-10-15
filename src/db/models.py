@@ -241,6 +241,7 @@ class JudgeResult(Base):
     result: Mapped[str] = mapped_column(
         Enum("AC", "WA", "TLE", "MLE", "RE", "CE", "OLE", "IE"), nullable=False
     )
+    command: Mapped[str] = mapped_column(String(255), nullable=False)
     timeMS: Mapped[int] = mapped_column(Integer, nullable=False)
     memoryKB: Mapped[int] = mapped_column(Integer, nullable=False)
     exit_code: Mapped[int] = mapped_column(Integer, nullable=False)
