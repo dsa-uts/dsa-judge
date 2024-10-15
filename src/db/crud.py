@@ -115,8 +115,15 @@ def update_submission_record(db: Session, submission_record: records.Submission)
     # assert raw_submission_record.lecture_id == submission_record.lecture_id
     # assert raw_submission_record.assignment_id == submission_record.assignment_id
     # assert raw_submission_record.eval == submission_record.eval
-    for attr, value in submission_record.model_dump(exclude={"judge_results", "uploaded_files"}).items():
-        setattr(raw_submission_record, attr, value)
+    raw_submission_record.progress = submission_record.progress.value
+    raw_submission_record.completed_task = submission_record.completed_task
+    raw_submission_record.total_task = submission_record.total_task
+    raw_submission_record.result = submission_record.result.value
+    raw_submission_record.message = submission_record.message
+    raw_submission_record.detail = submission_record.detail
+    raw_submission_record.score = submission_record.score
+    raw_submission_record.timeMS = submission_record.timeMS
+    raw_submission_record.memoryKB = submission_record.memoryKB
     db.commit()
 
     for judge_result in submission_record.judge_results:
