@@ -39,7 +39,7 @@ class JudgeInfo:
             if problem_record is None:
                 # Submissionテーブルのstatusをdoneに変更
                 self.submission_record.progress = records.SubmissionProgressStatus.DONE
-                message = f"Error on Problem {self.submission_record.lecture_id}-{self.submission_record.assignment_id}:{self.submission_record.for_evaluation}: Not found"
+                message = f"Error on Problem {self.submission_record.lecture_id}-{self.submission_record.assignment_id}: Not found"
                 detail = ""
 
                 self.submission_record.result = records.SubmissionSummaryStatus.IE
