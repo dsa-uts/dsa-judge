@@ -1,15 +1,10 @@
 from pathlib import Path
-from dataclasses import dataclass, field
 from sandbox.execute import Volume
 from sandbox.my_error import Error
 from sandbox.execute import TaskInfo
 from sandbox.execute import VolumeMountInfo
-from sqlalchemy.orm import Session
-from sandbox.execute import TaskResult
 from dotenv import load_dotenv
-from db.models import TestCases, Problem
-import logging
-from db.crud import *
+from db import records, crud
 from db.database import SessionLocal
 from checker import StandardChecker
 import os
@@ -23,112 +18,55 @@ RESOURCE_DIR = Path(os.getenv("RESOURCE_PATH"))
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR_PATH"))
 
 class JudgeInfo:
-    submission_record: SubmissionRecord # Submissionテーブル内のジャッジリクエストレコード
+    submission_record: records.Submission # Submissionテーブル内のジャッジリクエストレコード
 
-    problem_record: ProblemRecord  # Problemテーブル内のテーブルレコード
-
-    # ユーザに提出を求められているソースコードの名前リスト
-    required_files: list[str]
-    # こちらが用意しているソースコードのファイルパスの辞書
-    arranged_filepath_dict: dict[str, Path]
-    uploaded_filepaths: list[Path]  # ユーザが提出したソースコードのファイルパスのリスト
-
-    executable_list: list[str] # ビルド・実行される実行ファイル名リスト
+    problem_record: records.Problem # Problemテーブル内のテーブルレコード
 
     def __init__(
         self,
-        submission: SubmissionRecord
+        submission: records.Submission
     ):
         self.submission_record = submission
 
         with SessionLocal() as db:
-
-            problem_record = fetch_problem(
+            problem_record = crud.fetch_problem(
                 db=db,
                 lecture_id=self.submission_record.lecture_id,
                 assignment_id=self.submission_record.assignment_id,
-                for_evaluation=self.submission_record.for_evaluation,
+                eval=self.submission_record.eval
             )
 
             if problem_record is None:
                 # Submissionテーブルのstatusをdoneに変更
-                self.submission_record.progress = SubmissionProgressStatus.DONE
-                message = f"Error on Problem {self.submission_record.lecture_id}-{self.submission_record.assignment_id}:{self.submission_record.for_evaluation}: Not found"
-                detail = message
-                # SubmissionSummaryレコードを作成
-                submission_summary = SubmissionSummaryRecord(
-                    submission_id=self.submission_record.id,
-                    batch_id=self.submission_record.batch_id,
-                    user_id=self.submission_record.user_id,
-                    lecture_id=self.submission_record.lecture_id,
-                    assignment_id=self.submission_record.assignment_id,
-                    for_evaluation=self.submission_record.for_evaluation,
-                    result=SubmissionSummaryStatus.IE,
-                    message=message,
-                    detail=detail,
-                    score=0
-                )
+                self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                message = f"Error on Problem {self.submission_record.lecture_id}-{self.submission_record.assignment_id}: Not found"
+                detail = ""
 
-                register_submission_summary_recursive(db=db, submission_summary=submission_summary)
-                update_submission_record(db=db, submission_record=self.submission_record)
+                self.submission_record.result = records.SubmissionSummaryStatus.IE
+                self.submission_record.message = message
+                self.submission_record.detail = detail
+                self.submission_record.score = 0
+                self.submission_record.timeMS = 0
+                self.submission_record.memoryKB = 0
+
+                crud.update_submission_record(db=db, submission_record=self.submission_record)
                 raise ValueError(message)
             else:
                 self.problem_record = problem_record
 
             judge_logger.debug(f"JudgeInfo.__init__: problem_record: {self.problem_record}")
 
-            # Get required file names
-            self.required_files = [
-                record.name
-                for record in fetch_required_files(
-                    db=db,
-                    lecture_id=self.submission_record.lecture_id,
-                    assignment_id=self.submission_record.assignment_id,
-                    for_evaluation=self.submission_record.for_evaluation,
-                )
-            ]
-
-            judge_logger.debug(f"JudgeInfo.__init__: required_files: {self.required_files}")
-
-            # Get arranged filepaths (The dictionary from str_id -> Path)
-            self.arranged_filepath_dict = {
-                file.str_id: RESOURCE_DIR / file.path
-                for file in fetch_arranged_filepaths(
-                    db=db,
-                    lecture_id=self.submission_record.lecture_id,
-                    assignment_id=self.submission_record.assignment_id,
-                    for_evaluation=self.submission_record.for_evaluation,
-                )
-            }
-
-            judge_logger.debug(f"JudgeInfo.__init__: required_files: {self.required_files}")
-
-            # Get uploaded filepaths
-            self.uploaded_filepaths = [
-                UPLOAD_DIR / filepath
-                for filepath in fetch_uploaded_filepaths(db=db, submission_id=self.submission_record.id)
-            ]
-
-            judge_logger.debug(f"JudgeInfo.__init__: uploaded_filepaths: {self.uploaded_filepaths}")
-
-            # Get executable names
-            self.executable_list = fetch_executables(
-                db=db,
-                lecture_id=self.submission_record.lecture_id,
-                assignment_id=self.submission_record.assignment_id,
-                for_evaluation=self.submission_record.for_evaluation,
-            )
-
-            judge_logger.debug(f"JudgeInfo.__init__: executables: {self.executable_list}")
-
-
     def _create_complete_volume(self) -> tuple[Volume, Error]:
         docker_volume, err = Volume.create()
         if not err.silence():
             return (Volume(""), Error(f"cannot create volume: {docker_volume.name}"))
 
+        uploaded_filepaths = [UPLOAD_DIR / file.path for file in self.submission_record.uploaded_files]
+
+        arranged_filepaths = [RESOURCE_DIR / file.path for file in self.problem_record.arranged_files]
+
         # copy uploaded files and arranged files to volume
-        err = docker_volume.copyFiles(self.uploaded_filepaths + list(self.arranged_filepath_dict.values()))
+        err = docker_volume.copyFiles(uploaded_filepaths + arranged_filepaths)
         if not err.silence():
             return (
                 Volume(""),
@@ -137,66 +75,26 @@ class JudgeInfo:
 
         return (docker_volume, Error.Nothing())
 
-    def _evaluation_summary(self, task: EvaluationItemRecord, result: EvaluationSummaryStatus, message: str, detail: str, score: int, timeMS: int, memoryKB: int, arranged_file_path: str | None,  judge_result_list: list[JudgeResultRecord] = []) -> EvaluationSummaryRecord:
-        return EvaluationSummaryRecord(
-            batch_id=self.submission_record.batch_id,
-            user_id=self.submission_record.user_id,
-            lecture_id=self.submission_record.lecture_id,
-            assignment_id=self.submission_record.assignment_id,
-            for_evaluation=self.submission_record.for_evaluation,
-            eval_id=task.str_id,
-            arranged_file_id=task.arranged_file_id,
-            result=result,
-            message=message,
-            detail=detail,
-            score=score,
-            timeMS=timeMS,
-            memoryKB=memoryKB,
-            eval_title=task.title,
-            eval_description=task.description,
-            eval_type=task.type,
-            arranged_file_path=arranged_file_path,
-            # id=(テーブル挿入時に自動で割り当てられる),
-            judge_result_list=judge_result_list
-        )
-
-    def _update_progress_of_submission(self, completed_task: int) -> None:
-        self.submission_record.completed_task = completed_task
+    def _update_progress_of_submission(self) -> None:
         with SessionLocal() as db:
-            update_submission_record(db=db, submission_record=self.submission_record)
+            crud.update_submission_record(db=db, submission_record=self.submission_record)
 
-    def _exec_built_task(self, working_volume: Volume, built_task: EvaluationItemRecord, container_name: str) -> EvaluationSummaryRecord:
-        # 紐づいているソースコードのpathを取得
-        arranged_file_path = None
-        if built_task.arranged_file_id is not None:
-            arranged_file_path = self.arranged_filepath_dict[built_task.arranged_file_id]
-
-        timeMS = 0
-        memoryKB = 0
-
-        judge_result_list: list[JudgeResultRecord] = []
-        for testcase in built_task.testcase_list:
+    def _exec_built_task(
+        self,
+        working_volume: Volume,
+        testcase_list: list[records.TestCases],
+        container_name: str,
+    ) -> list[records.JudgeResult]:
+        judge_result_list: list[records.JudgeResult] = []
+        for testcase in testcase_list:
             # 実行コマンド + 引数
             args = []
 
             # コマンドを追加
             args += testcase.command.strip().split()
 
-            if testcase.argument_path is not None:
-                try:
-                    # 引数ファイルの内容をargsに追加
-                    with open(RESOURCE_DIR / Path(testcase.argument_path), mode='r', encoding='utf-8') as f:
-                        argument_list = f.read().strip().split()
-                        args += argument_list
-                except FileNotFoundError:
-                    return self._evaluation_summary(task=built_task,
-                                result=EvaluationSummaryStatus.IE,
-                                message="argument file not found",
-                                detail=f"{testcase.argument_path}",
-                                score=0,
-                                timeMS=timeMS,
-                                memoryKB=memoryKB,
-                                arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None)
+            if testcase.args is not None:
+                args += testcase.args.strip().split()
 
             # NOTE) コンパイル時は、標準入力は受け付けないものとする。
 
@@ -212,117 +110,54 @@ class JudgeInfo:
 
             # sandbox環境で実行
             result, err = sandbox_task.run()
-            
-            # 実行時間とメモリの最大値を更新
-            timeMS = max(timeMS, result.timeMS)
-            memoryKB = max(memoryKB, result.memoryByte / 1024)
 
-            judge_result = JudgeResultRecord(
+            judge_result = records.JudgeResult(
                         submission_id=self.submission_record.id,
                         testcase_id=testcase.id,
-                        result=SingleJudgeStatus.AC,
+                        result=records.SingleJudgeStatus.AC,
+                        command=' '.join(args),
                         timeMS=result.timeMS,
                         memoryKB=result.memoryByte / 1024,
                         exit_code=result.exitCode,
                         stdout=result.stdout,
-                        stderr=result.stderr,
-                        description=testcase.description,
-                        command=" ".join(args),
-                        stdin=None,
-                        expected_stdout=None,
-                        expected_stderr=None,
-                        expected_exit_code=testcase.exit_code
+                        stderr=result.stderr
                     )
 
             # 進捗状況を更新
-            self._update_progress_of_submission(
-                completed_task=self.submission_record.completed_task + 1
-            )
+            self.submission_record.completed_task += 1
+            self._update_progress_of_submission()
 
             if not err.silence():
                 # 内部エラーにより失敗
-                judge_result.result = SingleJudgeStatus.IE
+                judge_result.result = records.SingleJudgeStatus.IE
                 judge_result_list.append(judge_result)
-                return self._evaluation_summary(task=built_task,
-                                result=EvaluationSummaryStatus.IE,
-                                message="Internal error while executing sandbox",
-                                detail=err.message,
-                                score=0,
-                                timeMS=timeMS,
-                                memoryKB=memoryKB,
-                                arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
-                                judge_result_list=judge_result_list)
+                return judge_result_list
 
             # NOTE: ビルドの際は、標準出力、標準エラー出力の確認はせず、戻り値のみの確認とする。
             # それは、Makefileによるビルドログの出力まで一致確認するのは厳格すぎるから。
 
             # コンパイルエラーかチェック
-            if result.exitCode != testcase.exit_code:
-                # コンパイルエラー
-                judge_result.result = SingleJudgeStatus.WA
-                judge_result_list.append(judge_result)
-                return self._evaluation_summary(task=built_task,
-                                result=EvaluationSummaryStatus.CE,
-                                message=f"Compile error when executing {" ".join(args)}",
-                                detail=result.stderr,
-                                score=0,
-                                timeMS=timeMS,
-                                memoryKB=memoryKB,
-                                arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None)
+            if result.exitCode != 0:
+                judge_result.result = records.SingleJudgeStatus.CE
 
             # TestCaseで設定されていたコンパイルジョブが正常に実行完了した
             # judge_result_listに追加
-            judge_result.result = SingleJudgeStatus.AC
             judge_result_list.append(judge_result)
 
-        # 全部のビルドが正常終了した
-        return self._evaluation_summary(
-            task=built_task,
-            result=EvaluationSummaryStatus.AC,
-            message=f"Compile Success",
-            detail="",
-            score=built_task.score,
-            timeMS=timeMS,
-            memoryKB=memoryKB,
-            arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
-            judge_result_list=judge_result_list
-        )
+        # 全部のビルドが終了した
+        return judge_result_list
 
-    def _exec_judge_task(self, working_volume: Volume, judge_task: EvaluationItemRecord, container_name: str) -> EvaluationSummaryRecord:
-        # 紐づいているソースコードのpathを取得
-        arranged_file_path = None
-        if judge_task.arranged_file_id is not None:
-            arranged_file_path = self.arranged_filepath_dict[judge_task.arranged_file_id]
-
-        # 実行時間とメモリの最大値を初期化
-        timeMS = 0
-        memoryKB = 0
-
-        judge_result_list: list[JudgeResultRecord] = []
-        for testcase in judge_task.testcase_list:
+    def _exec_judge_task(self, working_volume: Volume, testcase_list: list[records.TestCases], container_name: str) -> list[records.JudgeResult]:
+        judge_result_list: list[records.JudgeResult] = []
+        for testcase in testcase_list:
             # 実行コマンド + 引数
             args = []
 
             # コマンド、引数追加
             args += testcase.command.strip().split()
 
-            if testcase.argument_path is not None:
-                try:
-                    # 引数ファイルの内容をargsに追加
-                    with open(RESOURCE_DIR / Path(testcase.argument_path), mode='r', encoding='utf-8') as f:
-                        argument_list = f.read().strip().split()
-                        args += argument_list
-                except FileNotFoundError:
-                    return self._evaluation_summary(
-                                task=judge_task,
-                                result=EvaluationSummaryStatus.IE,
-                                message="argument file not found",
-                                detail=f"{testcase.argument_path}",
-                                score=0,
-                                timeMS=timeMS,
-                                memoryKB=memoryKB,
-                                arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None
-                            )
+            if testcase.args is not None:
+                args += testcase.args.strip().split()
 
             # 標準入力、想定される標準出力・標準エラー出力の取得
             stdin = None
@@ -359,108 +194,65 @@ class JudgeInfo:
             # sandbox環境で実行
             result, err = sandbox_task.run()
 
-            # 実行時間とメモリの最大値を更新
-            timeMS = max(timeMS, result.timeMS)
-            memoryKB = max(memoryKB, result.memoryByte / 1024)
-
-            judge_result = JudgeResultRecord(
+            judge_result = records.JudgeResult(
                         submission_id=self.submission_record.id,
                         testcase_id=testcase.id,
-                        result=SingleJudgeStatus.AC,
+                        result=records.SingleJudgeStatus.AC,
+                        command=' '.join(args),
                         timeMS=result.timeMS,
                         memoryKB=result.memoryByte / 1024,
                         exit_code=result.exitCode,
                         stdout=result.stdout,
-                        stderr=result.stderr,
-                        description=testcase.description,
-                        command=" ".join(args),
-                        stdin=stdin,
-                        expected_stdout=expected_stdout,
-                        expected_stderr=expected_stderr,
-                        expected_exit_code=testcase.exit_code
+                        stderr=result.stderr
                     )
 
             # 進捗状況を更新
-            self._update_progress_of_submission(
-                completed_task=self.submission_record.completed_task + 1
-            )
+            self.submission_record.completed_task += 1
+            self._update_progress_of_submission()
 
             if not err.silence():
                 judge_logger.critical(f"Internal error while executing sandbox: {err.message}")
                 # 内部エラーにより失敗
-                judge_result.result = SingleJudgeStatus.IE
+                # 内部エラーの場合は、即座に終了する
+                judge_result.result = records.SingleJudgeStatus.IE
                 judge_result_list.append(judge_result)
-                return self._evaluation_summary(task=judge_task,
-                                result=EvaluationSummaryStatus.IE,
-                                message="Internal error while executing sandbox",
-                                detail=err.message,
-                                score=0,
-                                timeMS=timeMS,
-                                memoryKB=memoryKB,
-                                arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
-                                judge_result_list=judge_result_list)
+                return judge_result_list
 
             # TLEチェック
             if result.TLE:
-                judge_result.result = SingleJudgeStatus.TLE
+                judge_result.result = records.SingleJudgeStatus.TLE
             # MLEチェック
             elif result.memoryByte + 1024 * 1024 > self.problem_record.memoryMB * 1024 * 1024:
-                judge_result.result = SingleJudgeStatus.MLE
+                judge_result.result = records.SingleJudgeStatus.MLE
             # RE(Runtime Errorチェック)
             elif result.exitCode != expected_exit_code:
-                judge_result.result = SingleJudgeStatus.RE
+                judge_result.result = records.SingleJudgeStatus.RE
             # Wrong Answerチェック
-            elif not StandardChecker.match(
-                expected_stdout, result.stdout
-            ) or not StandardChecker.match(expected_stderr, result.stderr):
-                judge_result.result = SingleJudgeStatus.WA
+            elif not (
+                expected_stdout is not None
+                and StandardChecker.match(expected_stdout, result.stdout)
+            ) or not (
+                expected_stderr is not None
+                and StandardChecker.match(expected_stderr, result.stderr)
+            ):
+                judge_result.result = records.SingleJudgeStatus.WA
             else:
                 # AC(正解)
-                judge_result.result= SingleJudgeStatus.AC
+                judge_result.result= records.SingleJudgeStatus.AC
 
-            # TestCaseで設定されていたジョブが正常の実行完了した
+            # TestCaseで設定されていたジョブが正常に実行完了した
             # judge_result_listに追加
             judge_result_list.append(judge_result)
 
-        # 全部のジャッジが正常に終了した
-        # judge_result_listの中の結果を集計
-        # judge_result_listの中で最も厳しい結果を取得
-        worst_result = max(judge_result.result for judge_result in judge_result_list)
+        return judge_result_list
 
-        # SingleJudgeStatus -> EvaluationSummaryStatusに変換
-        worst_result = EvaluationSummaryStatus[worst_result.name]
-
-        # スコア計算
-        score = judge_task.score if worst_result == EvaluationSummaryStatus.AC else 0
-
-        # 結果メッセージを生成
-        message = f"Judge completed. Result: {worst_result.name}"
-
-        detail = ""
-
-        return self._evaluation_summary(
-            task=judge_task,
-            result=worst_result,
-            message=message,
-            detail=detail,
-            score=score,
-            timeMS=timeMS,
-            memoryKB=memoryKB,
-            arranged_file_path=str(arranged_file_path) if arranged_file_path is not None else None,
-            judge_result_list=judge_result_list
-        )
-
-    def _closing_procedure(self, submission_summary: SubmissionSummaryRecord, working_volume: Volume | None) -> Error:
+    def _closing_procedure(self, submission_record: records.Submission, working_volume: Volume | None) -> Error:
         # SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
         with SessionLocal() as db:
-            register_submission_summary_recursive(
+            submission_record.progress = records.SubmissionProgressStatus.DONE
+            crud.update_submission_record(
                 db=db,
-                submission_summary=submission_summary
-            )
-            self.submission_record.progress = SubmissionProgressStatus.DONE
-            update_submission_record(
-                db=db,
-                submission_record=self.submission_record
+                submission_record=submission_record
             )
         if working_volume is not None:
             # ボリュームの削除
@@ -472,38 +264,35 @@ class JudgeInfo:
         return Error.Nothing()
 
     def judge(self) -> Error:
-        submission_summary_record = SubmissionSummaryRecord(
-            submission_id=self.submission_record.id,
-            batch_id=self.submission_record.batch_id,
-            user_id=self.submission_record.user_id,
-            lecture_id=self.submission_record.lecture_id,
-            assignment_id=self.submission_record.assignment_id,
-            for_evaluation=self.submission_record.for_evaluation,
-            result=SubmissionSummaryStatus.AC, # 仮
-            message="", # 仮
-            detail="", # 仮
-            score=0, # 仮
-            timeMS=0, # 仮
-            memoryKB=0, # 仮
-            evaluation_summary_list=[] #仮
-        )
+        # testcase_id(key) -> TestCaseのdict
+        testcase_dict: dict[int, records.TestCases] = {}
+        for testcase in self.problem_record.test_cases:
+            testcase_dict[testcase.id] = testcase
+
+        # 仮の値を設定
+        self.submission_record.result = records.SubmissionSummaryStatus.AC
+        self.submission_record.message = ""
+        self.submission_record.detail = ""
+        self.submission_record.score = 0
+        self.submission_record.timeMS = 0
+        self.submission_record.memoryKB = 0
 
         # 1. ビルド前チェックを行う
         # アップロードされたファイルの中に、要求されているファイルが含まれているかチェックする。
         # 注)このとき、他のファイルが含まれていても良しとする(現状の判断では)
-        uploaded_filename = [file_path.name for file_path in self.uploaded_filepaths]
+        uploaded_filename = [Path(file_path.path).name for file_path in self.submission_record.uploaded_files]
+        required_filename = [required_file.name for required_file in self.problem_record.required_files]
 
-        # self.required_filesの内容がuploaded_filenameに完全に含まれているか調べる
-        missing_files = set(self.required_files) - set(uploaded_filename)
+        # self.problem_record.required_filesの内容がuploaded_filenameに完全に含まれているか調べる
+        missing_files = set(required_filename) - set(uploaded_filename)
         if missing_files:
             # ファイルが見つからなかったことをDBに登録して、早期終了
-            submission_summary_record.result = SubmissionSummaryStatus.FN
-            submission_summary_record.message = "ファイルが存在しません"
-            submission_summary_record.detail = f"{' '.join(missing_files)}"
-            submission_summary_record.score = 0
-            submission_summary_record.evaluation_summary_list = []
+            self.submission_record.result = records.SubmissionSummaryStatus.FN
+            self.submission_record.message = "ファイルが存在しません"
+            self.submission_record.detail = f"{' '.join(missing_files)}"
+            self.submission_record.score = 0
             return self._closing_procedure(
-                submission_summary=submission_summary_record,
+                submission_record=self.submission_record,
                 working_volume=None
             )
 
@@ -511,77 +300,62 @@ class JudgeInfo:
         # required_files, arranged_filesが入ったボリュームを作る
         working_volume, err = self._create_complete_volume()
         if not err.silence():
-            submission_summary_record.result = SubmissionSummaryStatus.IE
-            submission_summary_record.message = "error when executing sandbox"
-            submission_summary_record.detail = err.message
-            # submission_summary_record.score = (total sum)
-            submission_summary_record.evaluation_summary_list = evaluation_summary_list
+            self.submission_record.result = records.SubmissionSummaryStatus.IE
+            self.submission_record.message = "error when executing sandbox"
+            self.submission_record.detail = err.message
+            self.submission_record.score = 0
             return self._closing_procedure(
-                submission_summary=submission_summary_record,
+                submission_record=self.submission_record,
                 working_volume=working_volume
             )
 
-        evaluation_summary_list = []
+        self.submission_record.judge_results = []
 
         # 3. Builtテストケース(コンパイル)を実行する
-        built_task_list = [task for task in self.problem_record.evaluation_item_list if task.type == EvaluationType.Built]
-        for built_task in built_task_list:
-            evaluation_summary = self._exec_built_task(
-                working_volume=working_volume,
-                built_task=built_task,
-                container_name="checker-lang-gcc"
+        built_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Built]
+        build_exec_result_list = self._exec_built_task(
+            working_volume=working_volume,
+            testcase_list=built_task_list,
+            container_name="checker-lang-gcc"
+        )
+        self.submission_record.judge_results += build_exec_result_list
+        
+        # ジャッジ結果の集約
+        for exec_result in build_exec_result_list:
+            self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
+            self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
+            self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
+            self.submission_record.result = max(self.submission_record.result, records.SubmissionSummaryStatus[exec_result.result.value])
+            
+            if exec_result.result != records.SingleJudgeStatus.AC:
+                corresponding_testcase = testcase_dict[exec_result.testcase_id]
+                self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
+            
+        if self.submission_record.result != records.SubmissionSummaryStatus.AC:
+            self.submission_record.message += "ビルドに失敗しました\n"
+            return self._closing_procedure(
+                submission_record=self.submission_record,
+                working_volume=working_volume
             )
-            evaluation_summary_list.append(evaluation_summary)
-
-            if evaluation_summary.result != EvaluationSummaryStatus.AC:
-                # コンパイル失敗した場合は早期終了する
-                submission_summary_record.result = SubmissionSummaryStatus.CE
-                submission_summary_record.message = evaluation_summary.message
-                submission_summary_record.detail = evaluation_summary.detail
-                # 実行時間とメモリの最大値を更新
-                submission_summary_record.timeMS = max(submission_summary_record.timeMS, evaluation_summary.timeMS)
-                submission_summary_record.memoryKB = max(submission_summary_record.memoryKB, evaluation_summary.memoryKB)
-                # submission_summary_record.score = (total sum)
-                submission_summary_record.evaluation_summary_list = evaluation_summary_list
-                return self._closing_procedure(
-                    submission_summary=submission_summary_record,
-                    working_volume=working_volume
-                )
-            else:
-                # 実行時間とメモリの最大値を更新
-                submission_summary_record.timeMS = max(submission_summary_record.timeMS, evaluation_summary.timeMS)
-                submission_summary_record.memoryKB = max(submission_summary_record.memoryKB, evaluation_summary.memoryKB)
-                # スコアを加算
-                submission_summary_record.score += built_task.score
 
         # 4. 必要な実行ファイルが生成されているか調べる
-
-        # Executablesテーブルから、必要な実行バイナリのファイル名リストを取得
-        executable_list = []
-        with SessionLocal() as db:
-            executable_list = fetch_executables(
-                db=db,
-                lecture_id=self.problem_record.lecture_id,
-                assignment_id=self.problem_record.assignment_id,
-                for_evaluation=self.problem_record.for_evaluation
-            )
+        executable_list = [executable.name for executable in self.problem_record.executables]
 
         # Volume内でどのようなファイルが生成されたか調べる
         sandbox_env = TaskInfo(
             name="binary-runner", 
             arguments=["ls", "-p"],
             workDir="/workdir/",
-            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)])
+            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)]
+        )
         result, err = sandbox_env.run()
 
         if not err.silence():
-            submission_summary_record.result = SubmissionSummaryStatus.IE
-            submission_summary_record.message = "error when executing sandbox"
-            submission_summary_record.detail = err.message
-            # submission_summary_record.score = (total sum)
-            submission_summary_record.evaluation_summary_list = evaluation_summary_list
+            self.submission_record.result = records.SubmissionSummaryStatus.IE
+            self.submission_record.message += "error when executing sandbox: ls -lp\n"
+            self.submission_record.detail += f"{err.message}\n"
             return self._closing_procedure(
-                submission_summary=submission_summary_record,
+                submission_record=self.submission_record,
                 working_volume=working_volume
             )
 
@@ -592,37 +366,35 @@ class JudgeInfo:
         not_found_executable_set = set(executable_list) - set(all_files_in_sandbox)
         if not_found_executable_set:
             # 必要な実行バイナリが見つからなかったことをDBに登録して、早期終了
-            submission_summary_record.result = SubmissionSummaryStatus.CE
-            submission_summary_record.message = "実行ファイルが出力されていません"
-            submission_summary_record.detail = f"{' '.join(not_found_executable_set)}"
+            self.submission_record.result = records.SubmissionSummaryStatus.CE
+            self.submission_record.message += "実行ファイルが出力されていません\n"
+            self.submission_record.detail += f"{' '.join(not_found_executable_set)}\n"
             # submission_summary_record.score = (total sum)
-            submission_summary_record.evaluation_summary_list = evaluation_summary_list
             return self._closing_procedure(
-                submission_summary=submission_summary_record,
+                submission_record=self.submission_record,
                 working_volume=working_volume
             )
 
         # Judgeテストケース(実行・チェック)を実行する
-        judge_task_list = [task for task in self.problem_record.evaluation_item_list if task.type == EvaluationType.Judge]
-        for judge_task in judge_task_list:
-            evaluation_summary = self._exec_judge_task(
-                working_volume=working_volume,
-                judge_task=judge_task,
-                container_name="binary-runner"
-            )
-            evaluation_summary_list.append(evaluation_summary)
-            # 実行時間とメモリの最大値を更新
-            submission_summary_record.timeMS = max(submission_summary_record.timeMS, evaluation_summary.timeMS)
-            submission_summary_record.memoryKB = max(submission_summary_record.memoryKB, evaluation_summary.memoryKB)
-            # スコアを加算
-            submission_summary_record.score += judge_task.score
-            # 全体の結果を更新
-            submission_summary_record.result = max(submission_summary_record.result, SubmissionSummaryStatus[evaluation_summary.result.name])
-
-        submission_summary_record.evaluation_summary_list = evaluation_summary_list
+        judge_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Judge]
+        judge_exec_result_list = self._exec_judge_task(
+            working_volume=working_volume,
+            testcase_list=judge_task_list,
+            container_name="binary-runner"
+        )
+        self.submission_record.judge_results += judge_exec_result_list
+        
+        for exec_result in judge_exec_result_list:
+            self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
+            self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
+            self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
+            
+            if exec_result.result != records.SingleJudgeStatus.AC:
+                corresponding_testcase = testcase_dict[exec_result.testcase_id]
+                self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
 
         # 全体の結果を登録
         return self._closing_procedure(
-            submission_summary=submission_summary_record,
+            submission_record=self.submission_record,
             working_volume=working_volume
         )

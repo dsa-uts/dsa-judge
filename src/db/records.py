@@ -63,17 +63,6 @@ class SingleJudgeStatus(BaseJudgeStatusWithOrder):
     IE = "IE"  # Internal Error (e.g., docker sandbox management)
 
 
-class EvaluationSummaryStatus(BaseJudgeStatusWithOrder):
-    AC = "AC"  # Accepted
-    WA = "WA"  # Wrong Answer
-    TLE = "TLE"  # Time Limit Exceed
-    MLE = "MLE"  # Memory Limit Exceed
-    RE = "RE"  # Runtime Error
-    CE = "CE"  # Compile Error
-    OLE = "OLE"  # Output Limit Exceed (8000 bytes)
-    IE = "IE"  # Internal Error (e.g., docker sandbox management)
-
-
 class SubmissionSummaryStatus(BaseJudgeStatusWithOrder):
     AC = "AC"  # Accepted
     WA = "WA"  # Wrong Answer
@@ -86,67 +75,76 @@ class SubmissionSummaryStatus(BaseJudgeStatusWithOrder):
     FN = "FN"  # File Not found
 
 
-class SubmissionRecord(BaseModel):
+class Lecture(BaseModel):
     id: int
-    ts: datetime
-    batch_id: int | None
-    user_id: str
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    progress: SubmissionProgressStatus
-    total_task: int = Field(default=0)
-    completed_task: int = Field(default=0)
+    title: str
+    start_date: datetime
+    end_date: datetime
+
+    problems: list["Problem"] = Field(default_factory=list)
 
     model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+    
+    @field_serializer("start_date")
+    def serialize_start_date(self, start_date: datetime, _info):
+        return start_date.isoformat()
+    
+    @field_serializer("end_date")
+    def serialize_end_date(self, end_date: datetime, _info):
+        return end_date.isoformat()
+
+
+class Problem(BaseModel):
+    lecture_id: int
+    assignment_id: int
+    title: str
+    description_path: str
+    timeMS: int
+    memoryMB: int
+    
+    executables: list["Executables"]
+    arranged_files: list["ArrangedFiles"]
+    required_files: list["RequiredFiles"]
+    test_cases: list["TestCases"]
+    
+    model_config = {
         "from_attributes": True
     }
 
-    @field_serializer("progress")
-    def serialize_progress(self, progress: SubmissionProgressStatus, _info):
-        return progress.value
 
-
-class ArrangedFileRecord(BaseModel):
-    str_id: str
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    path: str
-
-    model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
-        "from_attributes": True
-    }
-
-
-class RequiredFileRecord(BaseModel):
+class Executables(BaseModel):
     id: int
     lecture_id: int
     assignment_id: int
-    for_evaluation: bool
+    eval: bool
     name: str
     
     model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
         "from_attributes": True
     }
 
 
-class TestCaseRecord(BaseModel):
+class ArrangedFiles(BaseModel):
     id: int
-    eval_id: str
-    description: str | None
-    command: str  # nullable=False
-    argument_path: str | None
-    stdin_path: str | None
-    stdout_path: str | None
-    stderr_path: str | None
-    exit_code: int  # default: 0
-
+    lecture_id: int
+    assignment_id: int
+    eval: bool
+    path: str
+    
     model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
+        "from_attributes": True
+    }
+
+
+class RequiredFiles(BaseModel):
+    id: int
+    lecture_id: int
+    assignment_id: int
+    name: str
+    
+    model_config = {
         "from_attributes": True
     }
 
@@ -156,139 +154,101 @@ class EvaluationType(Enum):
     Judge = "Judge"
 
 
-class EvaluationItemRecord(BaseModel):
-    str_id: str
+class TestCases(BaseModel):
+    id: int
     lecture_id: int
     assignment_id: int
-    for_evaluation: bool
+    eval: bool
+    type: EvaluationType
+    score: int
     title: str
     description: str | None
-    score: int
-    type: EvaluationType
-    arranged_file_id: str | None
     message_on_fail: str | None
-    # 紐づいているTestCaseRecordのリスト
-    testcase_list: list[TestCaseRecord] = Field(default_factory=list)
-
+    command: str
+    args: str | None
+    stdin_path: str | None
+    stdout_path: str | None
+    stderr_path: str | None
+    exit_code: int
+    
     model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
         "from_attributes": True
     }
-
+    
     @field_serializer("type")
     def serialize_type(self, type: EvaluationType, _info):
         return type.value
 
 
-class ProblemRecord(BaseModel):
+class Submission(BaseModel):
+    id: int
+    ts: datetime
+    evaluation_status_id: int | None
+    user_id: str
     lecture_id: int
     assignment_id: int
-    for_evaluation: bool
-    title: str
-    description_path: str
-    timeMS: int
-    memoryMB: int
-    # 紐づいているEvaluationItemRecordのリスト
-    evaluation_item_list: list[EvaluationItemRecord] = Field(default_factory=list)
+    eval: bool
+    progress: SubmissionProgressStatus
+    total_task: int = Field(default=0)
+    completed_task: int = Field(default=0)
+    result: SubmissionSummaryStatus | None
+    message: str | None
+    detail: str | None
+    score: int | None
+    timeMS: int | None
+    memoryKB: int | None
+    
+    problem: Problem
+    
+    uploaded_files: list["UploadedFiles"] = Field(default_factory=list)
+    
+    judge_results: list["JudgeResult"] = Field(default_factory=list)
 
     model_config = {
         # sqlalchemyのレコードデータからマッピングするための設定
         "from_attributes": True
     }
+    
+    @field_serializer("ts")
+    def serialize_ts(self, ts: datetime, _info):
+        return ts.isoformat()
+
+    @field_serializer("progress")
+    def serialize_progress(self, progress: SubmissionProgressStatus, _info):
+        return progress.value
+    
+    @field_serializer("result")
+    def serialize_result(self, result: SubmissionSummaryStatus, _info):
+        return result.value if result is not None else None
 
 
-class JudgeResultRecord(BaseModel):
-    parent_id: int = Field(default=0)
+class UploadedFiles(BaseModel):
+    id: int
+    submission_id: int
+    path: str
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class JudgeResult(BaseModel):
+    id: int = Field(default=0)
     submission_id: int
     testcase_id: int
     result: SingleJudgeStatus
+    command: str
     timeMS: int
     memoryKB: int
     exit_code: int
     stdout: str
     stderr: str
-    # TestCasesレコードから取ってくる値
-    description: str | None
-    command: str
-    stdin: str | None
-    expected_stdout: str | None
-    expected_stderr: str | None
-    expected_exit_code: int = Field(default=0)
-    # テーブル挿入時に自動で決まる値
-    id: int = Field(default=0)
-    ts: datetime = Field(default_factory=lambda: datetime(1998, 6, 6, 12, 32, 41))
-
+    
     model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
         "from_attributes": True
     }
-
+    
     @field_serializer("result")
     def serialize_result(self, result: SingleJudgeStatus, _info):
-        return result.value
-
-
-class EvaluationSummaryRecord(BaseModel):
-    parent_id: int = Field(default=0)
-    batch_id: int | None
-    user_id: str
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    eval_id: str
-    arranged_file_id: str | None
-    result: EvaluationSummaryStatus
-    message: str | None
-    detail: str | None
-    score: int
-    timeMS: int = Field(default=0)
-    memoryKB: int = Field(default=0)
-    # 外部キー関係ではないけどEvaluationItemsやArrangedFilesから取ってくる値
-    eval_title: str  # EvaluationItems.title
-    eval_description: str | None  # EvaluationItems.description
-    eval_type: EvaluationType  # EvaluationItems.type
-    arranged_file_path: str | None  # Arrangedfiles.path
-    # テーブルに挿入時に自動で値が決まるフィールド
-    id: int = Field(default=0)  # auto increment PK
-    # 以降、クライアントで必要になるフィールド
-    judge_result_list: list[JudgeResultRecord] = Field(default_factory=list)
-
-    model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
-        "from_attributes": True
-    }
-
-    @field_serializer("result")
-    def serialize_result(self, result: EvaluationSummaryStatus, _info):
-        return result.value
-    
-    @field_serializer("eval_type")
-    def serialize_eval_type(self, eval_type: EvaluationType, _info):
-        return eval_type.value
-
-
-class SubmissionSummaryRecord(BaseModel):
-    submission_id: int
-    batch_id: int | None
-    user_id: str
-    lecture_id: int
-    assignment_id: int
-    for_evaluation: bool
-    result: SubmissionSummaryStatus
-    message: str | None
-    detail: str | None
-    score: int
-    timeMS: int = Field(default=0)
-    memoryKB: int = Field(default=0)
-    # 以降、クライアントで必要になるフィールド
-    evaluation_summary_list: list[EvaluationSummaryRecord] = Field(default_factory=list)
-
-    model_config = {
-        # sqlalchemyのレコードデータからマッピングするための設定
-        "from_attributes": True
-    }
-
-    @field_serializer("result")
-    def serialize_result(self, result: SubmissionSummaryStatus, _info):
         return result.value
 

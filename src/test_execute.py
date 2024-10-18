@@ -468,14 +468,18 @@ def test_UseManyStack():
 # 試しにジャッジリクエストを投じてみて、どのような結果になるか見てみる。
 def test_submit_judge():
     with SessionLocal() as db:
+        # ユーザーを作成
+        if not user_exists(db=db, user_id="test_user"):
+            create_user(db=db, user_id="test_user")
+
         # ジャッジリクエストを登録
         submission = register_judge_request(
             db=db,
-            batch_id=None,
-            user_id="202420659",
+            evaluation_status_id=None,
+            user_id="test_user",
             lecture_id=1,
             assignment_id=1,
-            for_evaluation=False,
+            eval=False,
         )
 
         # 提出されたファイルを登録
@@ -504,18 +508,15 @@ def test_submit_judge():
             # ジャッジが完了するまでsubmissionのステータスを見張る
             submission_record = fetch_submission_record(db=db, submission_id=submission.id)
             test_logger.debug(f"progress: {submission_record.completed_task} / {submission_record.total_task}")
-            if submission_record.progress == SubmissionProgressStatus.DONE:
+            if submission_record.progress == records.SubmissionProgressStatus.DONE:
                 break
         time.sleep(1.0)
     
     # 結果を取得する
     with SessionLocal() as db:
-        submission_summary = fetch_submission_summary(db=db, submission_id=submission.id)
+        submission_record = fetch_submission_record(db=db, submission_id=submission.id)
         
     test_logger.info(f"entire summary:")
-    test_logger.info(f"{submission_summary!r}")
-    for evaluation_summary in submission_summary.evaluation_summary_list:
-        test_logger.info(f"evaluation summary: {evaluation_summary}")
-        for judge_result in evaluation_summary.judge_result_list:
-            test_logger.info(f"detail: {judge_result}")
-
+    test_logger.info(submission_record.model_dump_json(indent=2))
+    
+    # delete_user(db=db, user_id="test_user")
