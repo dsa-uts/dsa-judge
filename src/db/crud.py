@@ -25,7 +25,7 @@ def define_crud_logger(logger: logging.Logger):
 def fetch_queued_judge_and_change_status_to_running(
     db: Session, n: int
 ) -> list[records.Submission]:
-    CRUD_LOGGER.debug("fetch_queued_judgeが呼び出されました")
+    # CRUD_LOGGER.debug("fetch_queued_judgeが呼び出されました")
     try:
         # FOR UPDATE NOWAITを使用して排他的にロックを取得
         # CRUD_LOGGER.debug("FOR UPDATE NOWAITを使用して排他的にロックを取得")
@@ -72,7 +72,7 @@ def fetch_queued_judge_and_change_status_to_running(
 def fetch_problem(
     db: Session, lecture_id: int, assignment_id: int, eval: bool
 ) -> records.Problem | None:
-    CRUD_LOGGER.debug("fetch_problemが呼び出されました")
+    # CRUD_LOGGER.debug("fetch_problemが呼び出されました")
     try:
         problem = (
             db.query(models.Problem)
@@ -101,7 +101,7 @@ def fetch_problem(
 # 特定のSubmissionに対応するジャッジリクエストの属性値を変更する
 # 注) SubmissionRecord.idが同じレコードがテーブル内にあること
 def update_submission_record(db: Session, submission_record: records.Submission) -> None:
-    CRUD_LOGGER.debug("call update_submission_status")
+    # CRUD_LOGGER.debug("call update_submission_status")
     raw_submission_record = (
         db.query(models.Submission)
         .filter(models.Submission.id == submission_record.id)
@@ -138,7 +138,7 @@ def update_submission_record(db: Session, submission_record: records.Submission)
 #    全て"queued"に変更する
 # 2. 変更したジャッジリクエストについて、それに紐づいたJudgeResult, EvaluationSummary, SubmissionSummaryを全て削除する
 def undo_running_submissions(db: Session) -> None:
-    CRUD_LOGGER.debug("call undo_running_submissions")
+    # CRUD_LOGGER.debug("call undo_running_submissions")
     # 1. "running"状態のSubmissionを全て取得
     running_submissions = (
         db.query(models.Submission)
@@ -183,7 +183,7 @@ def register_judge_request(
     assignment_id: int,
     eval: bool,
 ) -> records.Submission:
-    CRUD_LOGGER.debug("call register_judge_request")
+    # CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
         evaluation_status_id=evaluation_status_id,
         user_id=user_id,
@@ -199,7 +199,7 @@ def register_judge_request(
 
 # アップロードされたファイルをUploadedFilesに登録する
 def register_uploaded_files(db: Session, submission_id: int, path: Path) -> None:
-    CRUD_LOGGER.debug("call register_uploaded_files")
+    # CRUD_LOGGER.debug("call register_uploaded_files")
     new_uploadedfiles = models.UploadedFiles(
         submission_id=submission_id, path=str(path)
     )
@@ -210,7 +210,7 @@ def register_uploaded_files(db: Session, submission_id: int, path: Path) -> None
 # Submissionテーブルのジャッジリクエストをキューに追加する
 # 具体的にはSubmissionレコードのstatusをqueuedに変更する
 def enqueue_judge_request(db: Session, submission_id: int) -> None:
-    CRUD_LOGGER.debug("call enqueue_judge_request")
+    # CRUD_LOGGER.debug("call enqueue_judge_request")
     pending_submission = (
         db.query(models.Submission)
         .filter(models.Submission.id == submission_id)
@@ -226,7 +226,7 @@ def enqueue_judge_request(db: Session, submission_id: int) -> None:
 
 # Submissionテーブルのジャッジリクエストのstatusを確認する
 def fetch_submission_record(db: Session, submission_id: int) -> records.Submission:
-    CRUD_LOGGER.debug("call fetch_judge_status")
+    # CRUD_LOGGER.debug("call fetch_judge_status")
     submission = (
         db.query(models.Submission)
         .filter(models.Submission.id == submission_id)
