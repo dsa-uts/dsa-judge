@@ -1,4 +1,8 @@
+#!/bin/bash
+
 set -e
+
+SCRIPT_DIR=$(cd $(dirname $0); pwd)
 
 # サンドボックスコンテナのCPUを隔離
 mkdir -p /sys/fs/cgroup/judge.slice/
@@ -15,7 +19,7 @@ if ! which crun > /dev/null 2>&1; then
     # dockerの設定(デフォルトランタイムをcrunにする)
     # /etc/dockerがない場合は作成、ある場合でもエラーにならないようにする
     mkdir -p /etc/docker
-    cp docker-daemon.json /etc/docker/daemon.json
+    cp $SCRIPT_DIR/docker-daemon.json /etc/docker/daemon.json
 
     # dockerの再起動
     systemctl restart docker
