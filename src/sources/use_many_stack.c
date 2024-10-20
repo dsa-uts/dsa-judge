@@ -1,7 +1,4 @@
-#include <iostream>
-#include <unistd.h>
-
-using namespace std;
+#include <stdio.h>
 
 volatile int aplusb(int a, int b) {
     if (b == 0) return a;
@@ -9,5 +6,5 @@ volatile int aplusb(int a, int b) {
 }
 
 int main() {
-    cout << aplusb(0, 10'000'000) << endl;
+    printf("%d\n", aplusb(0, 10000000));
 }

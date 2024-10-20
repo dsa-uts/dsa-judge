@@ -1,1 +1,7 @@
 FROM ubuntu:24.10
+
+RUN mkdir -p /home/guest
+RUN chown -R 1000:1000 /home/guest
+RUN chmod -R 755 /home/guest
+
+WORKDIR /home/guest

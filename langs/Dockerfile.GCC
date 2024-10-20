@@ -3,3 +3,9 @@ FROM ubuntu:24.10
 RUN apt-get update; \
     apt-get install -y --no-install-recommends gcc make libc6-dev; \
     rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /home/guest
+RUN chown -R 1000:1000 /home/guest
+RUN chmod -R 755 /home/guest
+
+WORKDIR /home/guest

@@ -4,13 +4,14 @@
 import pytest
 import sandbox
 from sandbox.execute import TaskInfo
-from sandbox.execute import Volume
+from sandbox.execute import DockerVolume
 from sandbox.execute import VolumeMountInfo
 import logging
 from datetime import timedelta
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import time
+import docker
 
 from db.crud import *
 from db.database import SessionLocal
@@ -23,14 +24,14 @@ test_logger = logging.getLogger(__name__)
 # Dockerコンテナを起動して、Hello, World!を出力するテスト
 def test_RunHelloWorld():
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["echo", "Hello, World!"],
         timeoutSec=5.0,
         memoryLimitMB=256,
-        cpus=1,
+        cpuset=[0]
     )
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -47,14 +48,14 @@ def test_RunHelloWorld():
 # sandboxの戻り値をきちんとチェックできているか確かめるテスト
 def test_ExitCode():
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["sh", "-c", "exit 123"],
         timeoutSec=5.0,
         memoryLimitMB=256,
-        cpus=1,
+        cpuset=[0]
     )
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -68,12 +69,12 @@ def test_ExitCode():
 # 標準入力をきちんと受け取れているか確かめるテスト
 def test_Stdin():
     task = TaskInfo(
-        name="ubuntu",
-        arguments=["sh", "-c", "read input; test $input = dummy"],
+        imageName="binary-runner",
+        arguments=["sh", "-c", 'read input; [ "$input" = "dummy" ]'],
         Stdin="dummy",
     )
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -86,9 +87,9 @@ def test_Stdin():
 
 # 標準出力をきちんとキャプチャできているか確かめるテスト
 def test_Stdout():
-    task = TaskInfo(name="ubuntu", arguments=["echo", "dummy"])
+    task = TaskInfo(imageName="binary-runner", arguments=["echo", "dummy"])
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -101,9 +102,9 @@ def test_Stdout():
 
 # 標準エラー出力をちゃんとキャプチャできているか確かめるテスト
 def test_Stderr():
-    task = TaskInfo(name="ubuntu", arguments=["sh", "-c", "echo dummy >&2"])
+    task = TaskInfo(imageName="binary-runner", arguments=["sh", "-c", "echo dummy >&2"])
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -116,9 +117,9 @@ def test_Stderr():
 
 # sleepした分ちゃんと実行時間が計測されているか確かめるテスト
 def test_SleepTime():
-    task = TaskInfo(name="ubuntu", arguments=["sleep", "3"], timeoutSec=5.0)
+    task = TaskInfo(imageName="binary-runner", arguments=["sleep", "3"], timeoutSec=5.0)
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -132,9 +133,9 @@ def test_SleepTime():
 
 # タイムアウトをきちんと検出できているか確かめるテスト
 def test_Timeout():
-    task = TaskInfo(name="ubuntu", arguments=["sleep", "100"], timeoutSec=3.0)
+    task = TaskInfo(imageName="binary-runner", arguments=["sleep", "100"], timeoutSec=3.0)
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     test_logger.info(result)
     test_logger.info(err)
@@ -146,7 +147,8 @@ def test_Timeout():
 # ファイルをDockerボリュームにコピーするテスト
 def test_CopyFileFromClientToVolume():
     # ファイル転送先のボリュームの作成
-    volume, err = Volume.create()
+    client = docker.from_env()
+    volume, err = DockerVolume.create(client=client)
 
     assert err.message == ""
 
@@ -156,17 +158,18 @@ def test_CopyFileFromClientToVolume():
             f.write("Hello, World!")
 
         # ファイルをボリュームにコピー
-        volume.copyFile(Path(tempdir) / "test.txt", Path("test.txt"))
+        err = volume.copyFile(client=client, srcPathOnClient=Path(tempdir) / "test.txt", dstDirOnVolume=Path("./"))
+        assert err.message == ""
 
     # ファイルがコピーされたことを確認
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["cat", "test.txt"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
 
@@ -186,7 +189,8 @@ def test_CopyFileFromClientToVolume():
 # 複数のファイルをDockerボリュームにコピーするテスト
 def test_CopyFilesFromClientToVolume():
     # ファイル転送先のボリュームの作成
-    volume, err = Volume.create()
+    client = docker.from_env()
+    volume, err = DockerVolume.create(client=client)
 
     assert err.message == ""
 
@@ -199,23 +203,24 @@ def test_CopyFilesFromClientToVolume():
             f.write("Goodbye, World!")
 
         # ファイルをボリュームにコピー
-        volume.copyFiles(
-            filePathsFromClient=[
+        err = volume.copyFiles(
+            client=client,
+            srcPathsOnClient=[
                 Path(tempdir) / "test1.txt",
                 Path(tempdir) / "test2.txt",
             ],
-            DirPathInVolume=Path("./"),
+            dstDirOnVolume=Path("./"),
         )
-
+        assert err.message == ""
     # ファイルがコピーされたことを確認
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["cat", "test1.txt", "test2.txt"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
 
@@ -235,7 +240,8 @@ def test_CopyFilesFromClientToVolume():
 # Dockerボリュームにある複数のファイルを削除するテスト
 def test_RemoveFilesInVolume():
     # ファイル転送先のボリュームの作成
-    volume, err = Volume.create()
+    client = docker.from_env()
+    volume, err = DockerVolume.create(client=client)
 
     assert err.message == ""
 
@@ -248,23 +254,25 @@ def test_RemoveFilesInVolume():
             f.write("Goodbye, World!")
 
         # ファイルをボリュームにコピー
-        volume.copyFiles(
-            filePathsFromClient=[
+        err = volume.copyFiles(
+            client=client,
+            srcPathsOnClient=[
                 Path(tempdir) / "test1.txt",
                 Path(tempdir) / "test2.txt",
             ],
-            DirPathInVolume=Path("./"),
+            dstDirOnVolume=Path("./"),
         )
+        assert err.message == ""
 
     # ファイルがコピーされたことを確認
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["ls"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
 
@@ -277,17 +285,18 @@ def test_RemoveFilesInVolume():
     assert result.stderr == ""
 
     # ファイルを削除
-    volume.removeFiles([Path("test1.txt"), Path("test2.txt")])
+    err = volume.removeFiles(client=client, filePathsInVolume=[Path("test1.txt"), Path("test2.txt")])
+    assert err.message == ""
 
     # ファイルが削除されたことを確認
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["ls"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
 
@@ -318,28 +327,29 @@ def test_CloneVolume():
             f2.write("Content of file2")
 
         # 元のボリュームを作成
-        original_volume, err = Volume.create()
+        client = docker.from_env()
+        original_volume, err = DockerVolume.create(client=client)
         assert err.message == ""
 
         # テストファイルを元のボリュームにコピー
-        err = original_volume.copyFile(Path(file1_path), Path("file1.txt"))
+        err = original_volume.copyFile(client=client, srcPathOnClient=Path(file1_path))
         assert err.message == ""
-        err = original_volume.copyFile(Path(file2_path), Path("file2.txt"))
+        err = original_volume.copyFile(client=client, srcPathOnClient=Path(file2_path))
         assert err.message == ""
 
         # ボリュームをクローン
-        cloned_volume, err = original_volume.clone()
+        cloned_volume, err = original_volume.clone(client=client)
         assert err.message == ""
 
         # クローンされたボリュームの内容を確認
         task = TaskInfo(
-            name="ubuntu",
+            imageName="binary-runner",
             arguments=["ls"],
-            workDir="/workdir/",
-            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=cloned_volume)],
+            workDir="/home/guest/",
+            volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=cloned_volume)],
         )
 
-        result, err = task.run()
+        result, err = task.run(client=client)
         assert err.message == ""
         assert result.exitCode == 0
         assert "file1.txt" in result.stdout
@@ -354,13 +364,13 @@ def test_CloneVolume():
 # メモリ制限を検出できるかチェック
 def test_MemoryLimit():
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["dd", "if=/dev/zero", "of=/dev/null", "bs=800M"],
         timeoutSec=3.0,
         memoryLimitMB=500,
     )
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     assert err.message == ""
 
@@ -374,12 +384,12 @@ def test_MemoryLimit():
 # ネットワーク制限をできているかチェック
 def test_NetworkDisable():
     task = TaskInfo(
-        name="ibmcom/ping",
+        imageName="ibmcom/ping",
         arguments=["ping", "-c", "5", "google.com"],
         enableNetwork=None,
     )
 
-    result, err = task.run()
+    result, err = task.run(client=docker.from_env())
 
     assert err.message == ""
 
@@ -392,24 +402,25 @@ def test_NetworkDisable():
 
 # フォークボムなどの攻撃に対処できるように、プロセス数制限ができているかチェック
 def test_ForkBomb():
-    volume, err = Volume.create()
+    client = docker.from_env()
+    volume, err = DockerVolume.create(client=client)
 
     assert err.message == ""
 
-    err = volume.copyFile(Path("sources/fork_bomb.sh"), Path("fork_bomb.sh"))
+    err = volume.copyFile(client=client, srcPathOnClient=Path("sources/fork_bomb.sh"))
 
     assert err.message == ""
 
     task = TaskInfo(
-        name="ubuntu",
+        imageName="binary-runner",
         arguments=["./fork_bomb.sh"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
         timeoutSec=3.0,
         pidsLimit=10,
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
     test_logger.info(err)
@@ -421,22 +432,23 @@ def test_ForkBomb():
 
 # スタックメモリの制限ができているかチェック
 def test_UseManyStack():
-    volume, err = Volume.create()
+    client = docker.from_env()
+    volume, err = DockerVolume.create(client=client)
 
     assert err.message == ""
 
-    err = volume.copyFile(Path("sources/use_many_stack.cpp"), Path("use_many_stack.cpp"))
+    err = volume.copyFile(client=client, srcPathOnClient=Path("sources/use_many_stack.c"))
 
     assert err.message == ""
 
     task = TaskInfo(
-        name="gcc:13.3",
-        arguments=["g++", "use_many_stack.cpp"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        imageName="checker-lang-gcc",
+        arguments=["gcc", "use_many_stack.c"],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
     test_logger.info(err)
@@ -445,15 +457,15 @@ def test_UseManyStack():
     assert result.exitCode == 0
 
     task = TaskInfo(
-        name="gcc:13.3",
+        imageName="binary-runner",
         arguments=["./a.out"],
-        workDir="/workdir/",
-        volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=volume)],
+        workDir="/home/guest/",
+        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
         stackLimitKB=10240,
         memoryLimitMB=256,
     )
 
-    result, err = task.run()
+    result, err = task.run(client=client)
 
     test_logger.info(result)
     test_logger.info(err)
