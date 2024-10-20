@@ -1,5 +1,5 @@
 from pathlib import Path
-from sandbox.execute import Volume
+from sandbox.execute import DockerVolume
 from sandbox.my_error import Error
 from sandbox.execute import TaskInfo
 from sandbox.execute import VolumeMountInfo
@@ -8,6 +8,7 @@ from db import records, crud
 from db.database import SessionLocal
 from checker import StandardChecker
 import os
+import docker
 
 # ロガーの設定
 from log.config import judge_logger
@@ -16,11 +17,16 @@ load_dotenv()
 
 RESOURCE_DIR = Path(os.getenv("RESOURCE_PATH"))
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR_PATH"))
+GUEST_UID = os.getenv("GUEST_UID")
+GUEST_GID = os.getenv("GUEST_GID")
+CGROUP_PARENT = os.getenv("CGROUP_PARENT")
 
 class JudgeInfo:
     submission_record: records.Submission # Submissionテーブル内のジャッジリクエストレコード
 
     problem_record: records.Problem # Problemテーブル内のテーブルレコード
+    
+    client: docker.DockerClient
 
     def __init__(
         self,
@@ -55,21 +61,23 @@ class JudgeInfo:
                 self.problem_record = problem_record
 
             judge_logger.debug(f"JudgeInfo.__init__: problem_record: {self.problem_record}")
+        
+        self.client = docker.from_env()
 
-    def _create_complete_volume(self) -> tuple[Volume, Error]:
-        docker_volume, err = Volume.create()
+    def _create_complete_volume(self) -> tuple[DockerVolume, Error]:
+        docker_volume, err = DockerVolume.create(client=self.client)
         if not err.silence():
-            return (Volume(""), Error(f"cannot create volume: {docker_volume.name}"))
+            return (DockerVolume("", None), Error(f"cannot create volume: {docker_volume.name}"))
 
         uploaded_filepaths = [UPLOAD_DIR / file.path for file in self.submission_record.uploaded_files]
 
         arranged_filepaths = [RESOURCE_DIR / file.path for file in self.problem_record.arranged_files]
 
         # copy uploaded files and arranged files to volume
-        err = docker_volume.copyFiles(uploaded_filepaths + arranged_filepaths)
+        err = docker_volume.copyFiles(client=self.client, srcPathsOnClient=uploaded_filepaths + arranged_filepaths)
         if not err.silence():
             return (
-                Volume(""),
+                DockerVolume("", None),
                 Error(f"failed to copy uploaded files to volume: {docker_volume.name}"),
             )
 
@@ -81,7 +89,7 @@ class JudgeInfo:
 
     def _exec_built_task(
         self,
-        working_volume: Volume,
+        working_volume: DockerVolume,
         testcase_list: list[records.TestCases],
         container_name: str,
     ) -> list[records.JudgeResult]:
@@ -100,16 +108,19 @@ class JudgeInfo:
 
             # sandbox環境のセットアップ
             sandbox_task = TaskInfo(
-                name=container_name,
+                imageName=container_name,
                 arguments=args,
-                workDir="/workdir/",
-                volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=False)],
+                user=f"{GUEST_UID}",
+                groups=[f"{GUEST_GID}"],
+                workDir="/home/guest",
+                cgroupParent=CGROUP_PARENT,
+                volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=working_volume, read_only=False)],
                 timeoutSec=2.0,
                 memoryLimitMB=512
             )
 
             # sandbox環境で実行
-            result, err = sandbox_task.run()
+            result, err = sandbox_task.run(client=self.client)
 
             judge_result = records.JudgeResult(
                         submission_id=self.submission_record.id,
@@ -147,7 +158,7 @@ class JudgeInfo:
         # 全部のビルドが終了した
         return judge_result_list
 
-    def _exec_judge_task(self, working_volume: Volume, testcase_list: list[records.TestCases], container_name: str) -> list[records.JudgeResult]:
+    def _exec_judge_task(self, working_volume: DockerVolume, testcase_list: list[records.TestCases], container_name: str) -> list[records.JudgeResult]:
         judge_result_list: list[records.JudgeResult] = []
         for testcase in testcase_list:
             # 実行コマンド + 引数
@@ -179,10 +190,13 @@ class JudgeInfo:
 
             # sandbox環境のセットアップ
             sandbox_task = TaskInfo(
-                name=container_name,
+                imageName=container_name,
                 arguments=args,
-                workDir="/workdir/",
-                volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)],
+                user=f"{GUEST_UID}",
+                groups=[f"{GUEST_GID}"],
+                workDir="/home/guest",
+                cgroupParent=CGROUP_PARENT,
+                volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=working_volume, read_only=False)],
                 timeoutSec=self.problem_record.timeMS / 1000,
                 memoryLimitMB=self.problem_record.memoryMB
             )
@@ -192,7 +206,7 @@ class JudgeInfo:
                 sandbox_task.Stdin = stdin
 
             # sandbox環境で実行
-            result, err = sandbox_task.run()
+            result, err = sandbox_task.run(client=self.client)
 
             judge_result = records.JudgeResult(
                         submission_id=self.submission_record.id,
@@ -246,7 +260,7 @@ class JudgeInfo:
 
         return judge_result_list
 
-    def _closing_procedure(self, submission_record: records.Submission, working_volume: Volume | None) -> Error:
+    def _closing_procedure(self, submission_record: records.Submission, working_volume: DockerVolume | None) -> Error:
         # SubmissionSummaryレコードを登録し、submission.progress = 'Done'にする。
         with SessionLocal() as db:
             submission_record.progress = records.SubmissionProgressStatus.DONE
@@ -309,7 +323,7 @@ class JudgeInfo:
                 working_volume=working_volume
             )
 
-        self.submission_record.judge_results = []
+        judge_result_list = []
 
         # 3. Builtテストケース(コンパイル)を実行する
         built_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Built]
@@ -318,7 +332,7 @@ class JudgeInfo:
             testcase_list=built_task_list,
             container_name="checker-lang-gcc"
         )
-        self.submission_record.judge_results += build_exec_result_list
+        judge_result_list += build_exec_result_list
         
         # ジャッジ結果の集約
         for exec_result in build_exec_result_list:
@@ -343,12 +357,15 @@ class JudgeInfo:
 
         # Volume内でどのようなファイルが生成されたか調べる
         sandbox_env = TaskInfo(
-            name="binary-runner", 
+            imageName="binary-runner", 
             arguments=["ls", "-p"],
-            workDir="/workdir/",
-            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=working_volume, read_only=True)]
+            user=f"{GUEST_UID}",
+            groups=[f"{GUEST_GID}"],
+            workDir="/home/guest",
+            cgroupParent=CGROUP_PARENT,
+            volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=working_volume, read_only=True)]
         )
-        result, err = sandbox_env.run()
+        result, err = sandbox_env.run(client=self.client)
 
         if not err.silence():
             self.submission_record.result = records.SubmissionSummaryStatus.IE
@@ -382,7 +399,7 @@ class JudgeInfo:
             testcase_list=judge_task_list,
             container_name="binary-runner"
         )
-        self.submission_record.judge_results += judge_exec_result_list
+        judge_result_list += judge_exec_result_list
         
         for exec_result in judge_exec_result_list:
             self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
@@ -392,6 +409,8 @@ class JudgeInfo:
             if exec_result.result != records.SingleJudgeStatus.AC:
                 corresponding_testcase = testcase_dict[exec_result.testcase_id]
                 self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
+
+        self.submission_record.judge_results = judge_result_list
 
         # 全体の結果を登録
         return self._closing_procedure(

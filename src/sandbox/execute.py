@@ -10,13 +10,30 @@
 import uuid
 import subprocess
 import threading
+from pydantic import BaseModel, Field
 from dataclasses import dataclass, field
-from dataclasses import replace
 import time  # 実行時間の計測に使用
 import re
 from pathlib import Path
 from typing import Callable
 import logging
+import docker
+from docker.models.containers import Container
+from docker.models import volumes
+from docker.errors import APIError, ImageNotFound
+from docker.types import Ulimit, LogConfig
+import requests
+import tempfile
+import tarfile
+from dotenv import load_dotenv
+import os
+import socket
+
+load_dotenv()
+
+GUEST_UID = os.getenv("GUEST_UID")
+GUEST_GID = os.getenv("GUEST_GID")
+CGROUP_PARENT = os.getenv("CGROUP_PARENT")
 
 # 内部定義モジュールのインポート
 from .my_error import Error
@@ -28,15 +45,18 @@ def define_sandbox_logger(logger: logging.Logger):
     SANDBOX_LOGGER = logger
 
 # Dockerボリュームの管理クラス
-class Volume:
+class DockerVolume:
     name: str  # ボリューム名
-
-    def __init__(self, name: str):
+    _volume: volumes.Volume | None
+    
+    def __init__(self, name: str, volume: volumes.Volume | None = None):
         self.name = name
+        self._volume = volume
 
     @classmethod
-    def create(cls) -> tuple["Volume", Error]:
+    def create(cls, client: docker.DockerClient) -> tuple["DockerVolume", Error]:
         volumeName = "volume-" + str(uuid.uuid4())
+
 
         args = ["volume", "create"]
         args += ["--name", volumeName]
@@ -45,288 +65,281 @@ class Volume:
         cmd = ["docker"] + args
         err = ""
 
-        try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            err = f"Failed to create volume: {e}"
+        
+        args = ["volume", "create"]
+        args += ["--name", volumeName]
 
-        if err != "":
-            return Volume(""), Error(err)
-
-        SANDBOX_LOGGER.debug(f"volumeName: {volumeName}")
-        return Volume(volumeName), Error("")
-
-    def remove(self) -> Error:
-        args = ["volume", "rm", self.name]
-
+        # Dockerボリュームの作成
         cmd = ["docker"] + args
         err = ""
 
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            err = f"Failed to remove volume: {e}"
+            volume = client.volumes.create(name=volumeName)
+        except APIError as e:
+            return DockerVolume("", None), Error(f"Failed to create volume: {e}")
 
-        return Error(err)
+        SANDBOX_LOGGER.debug(f"volumeName: {volumeName}")
+        return DockerVolume(volumeName, volume), Error("")
 
-    def copyFile(self, filePathFromClient: Path, filePathInVolume: Path) -> Error:
-        ci = ContainerInfo("")
+    def remove(self) -> Error:
+        if self._volume is None:
+            return Error("Volume is not created")
 
-        err = ci.create(
-            containerName="ubuntu",
-            arguments=["echo", "Hello, World!"],
-            workDir="/workdir/",
-            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=self)],
-        )
-        if err.message != "":
-            return err
-        
-        # filePathInVolumeが絶対パスの場合、相対パスに変換
-        if filePathInVolume.is_absolute():
-            filePathInVolume = Path(".") / filePathInVolume.relative_to("/")
+        try:
+            self._volume.remove()
+        except APIError as e:
+            return Error(f"Failed to remove volume: {e}")
 
-        dstInContainer = Path("/workdir") / filePathInVolume
-        err = ci.copyFile(filePathFromClient, dstInContainer)
-
-        ci.remove()
-        return err
-
-    def copyFiles(
-        self, filePathsFromClient: list[Path], DirPathInVolume: Path = Path("./")
-    ) -> Error:
-        ci = ContainerInfo("")
-
-        err = ci.create(
-            containerName="ubuntu",
-            arguments=["echo", "Hello, World!"],
-            workDir="/workdir/",
-            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=self)],
-        )
-
-        if err.message != "":
-            return err
-        
-        # DirPathInVolumeが絶対パスの場合、相対パスに変換
-        if DirPathInVolume.is_absolute():
-            DirPathInVolume = Path(".") / DirPathInVolume.relative_to("/")
-
-        for PathInClient in filePathsFromClient:
-            dstInContainer = (
-                Path("/workdir") / DirPathInVolume / PathInClient.name
-            ).resolve()
-            err = ci.copyFile(PathInClient, str(dstInContainer))
-            if err.message != "":
-                ci.remove()
-                return err
-
-        ci.remove()
         return Error("")
 
-    def removeFiles(self, filePathsInVolume: list[Path]) -> Error:
+    def copyFile(self, client: docker.DockerClient, srcPathOnClient: Path, dstDirOnVolume: Path = Path("./")) -> Error:
+        try:
+            container: Container = client.containers.create(
+                image="binary-runner",
+                command=["echo", "Hello, World!"],
+                working_dir="/home/guest",
+                user=f"{GUEST_UID}:{GUEST_GID}",
+                volumes={self._volume.name: {'bind': '/home/guest', 'mode': 'rw'}}
+            )
+        
+            # filePathInVolumeが絶対パスの場合、相対パスに変換
+            if dstDirOnVolume.is_absolute():
+                dstDirOnVolume = Path(".") / dstDirOnVolume.relative_to("/")
+
+            dstInContainer = Path("/home/guest") / dstDirOnVolume / srcPathOnClient.name
+            # docker sdkのput_archiveは停止しているコンテナには使えない
+            # そのため、docker cpコマンドを使ってファイルをコピーする
+            cmd = ["docker", "cp", str(srcPathOnClient), f"{container.id}:{str(dstInContainer)}"]
+            SANDBOX_LOGGER.debug(f"cmd: {cmd}")
+            if subprocess.run(cmd, check=False).returncode != 0:
+                return Error(f"Failed to copy file")
+    
+            container.remove()
+        except APIError as e:
+            return Error(f"Failed to copy file: {e}")
+        except ImageNotFound as e:
+            return Error(f"Failed to copy file: {e}")
+        except Exception as e:
+            return Error(f"Failed to copy file: {e}")
+        return Error("")
+
+    def copyFiles(
+        self, client: docker.DockerClient, srcPathsOnClient: list[Path], dstDirOnVolume: Path = Path("./")
+    ) -> Error:
+        try:
+            container: Container = client.containers.create(
+                image="binary-runner",
+                command=["echo", "Hello, World!"],
+                working_dir="/home/guest",
+                user=f"{GUEST_UID}:{GUEST_GID}",
+                volumes={self._volume.name: {'bind': '/home/guest', 'mode': 'rw'}}
+            )
+            
+            # DirPathInVolumeが絶対パスの場合、相対パスに変換
+            if dstDirOnVolume.is_absolute():
+                dstDirOnVolume = Path(".") / dstDirOnVolume.relative_to("/")
+
+            for srcPathOnClient in srcPathsOnClient:
+                dstPathInContainer = Path("/home/guest") / dstDirOnVolume / srcPathOnClient.name
+                cmd = ["docker", "cp", str(srcPathOnClient), f"{container.id}:{str(dstPathInContainer)}"]
+                SANDBOX_LOGGER.debug(f"cmd: {cmd}")
+                if subprocess.run(cmd, check=False).returncode != 0:
+                    return Error(f"Failed to copy file")
+            
+            container.remove(force=True)
+        except APIError as e:
+            return Error(f"Failed to copy file: {e}")
+        except ImageNotFound as e:
+            return Error(f"Failed to copy file: {e}")
+        except Exception as e:
+            return Error(f"Failed to copy file: {e}")
+
+        return Error("")
+
+    def removeFiles(self, client: docker.DockerClient, filePathsInVolume: list[Path]) -> Error:
         arguments = ["rm"]
 
         for filePath in filePathsInVolume:
             if filePath.is_absolute():
                 filePath = Path(".") / filePath.relative_to("/")
-            filePathInContainer = Path("/workdir") / filePath
+            filePathInContainer = Path("/home/guest") / filePath
             arguments += [str(filePathInContainer.resolve())]
+            
+        try:
+            container: Container = client.containers.create(
+                image="binary-runner",
+                command=arguments,
+                working_dir="/home/guest",
+                user=f"{GUEST_UID}:{GUEST_GID}",
+                volumes={self._volume.name: {'bind': '/home/guest', 'mode': 'rw'}}
+            )
+            
+            container.start()
+            container.wait()
+            container.remove(force=True)
+        except APIError as e:
+            return Error(f"Failed to remove file: {e}")
+        except ImageNotFound as e:
+            return Error(f"Failed to remove file: {e}")
+        except Exception as e:
+            return Error(f"Failed to remove file: {e}")
 
-        ci = ContainerInfo("")
-
-        err = ci.create(
-            containerName="ubuntu",
-            arguments=arguments,
-            workDir="/workdir/",
-            volumeMountInfoList=[VolumeMountInfo(path="/workdir/", volume=self)],
-        )
-
-        if err.message != "":
-            return err
-
-        command = ["docker", "start", ci.containerID]
-
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-
-        err.message = result.stderr
-
-        if err.message != "":
-            return err
-
-        exit_code, err = inspectExitCode(ci.containerID)
-
-        if err.message != "":
-            return err
-
-        if exit_code != 0:
-            return Error(f"Failed to remove files: {result.stderr}")
-
-        ci.remove()
         return Error("")
     
-    def clone(self) -> tuple["Volume", Error]:
+    def clone(self, client: docker.DockerClient) -> tuple["DockerVolume", Error]:
         # 新しいDockerボリュームを作成
-        new_volume, err = Volume.create()
+        new_volume, err = DockerVolume.create(client)
         if err.message != "":
-            return Volume(""), Error(f"新しいボリュームの作成に失敗しました: {err.message}")
+            return DockerVolume("", None), Error(f"新しいボリュームの作成に失敗しました: {err.message}")
 
         # 元のボリュームの内容を新しいボリュームにコピー
-        ci = ContainerInfo("")
-        err = ci.create(
-            containerName="ubuntu",
-            arguments=["cp", "-a", "/src/.", "/dst/"],
-            workDir="/",
-            volumeMountInfoList=[
-                VolumeMountInfo(path="/src", volume=self),
-                VolumeMountInfo(path="/dst", volume=new_volume)
-            ]
-        )
-        if err.message != "":
-            return Volume(""), Error(f"コンテナの作成に失敗しました: {err.message}")
+        try:
+            container: Container = client.containers.create(
+                image="binary-runner",
+                command=["cp", "-r", "/workdir/src/.", "/workdir/dst"],
+                working_dir="/workdir",
+                user="root",
+                volumes={self._volume.name: {'bind': '/workdir/src', 'mode': 'rw'}, new_volume.name: {'bind': '/workdir/dst', 'mode': 'rw'}}
+            )
+            
+            container.start()
+            result = container.wait()
 
-        # コンテナを起動してコピーを実行
-        command = ["docker", "start", "-a", ci.containerID]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        
-        if result.returncode != 0:
-            return Volume(""), Error(f"ボリュームのコピーに失敗しました: {result.stderr}")
-
-        # コンテナを削除
-        ci.remove()
+            if result["StatusCode"] != 0:
+                new_volume.remove()
+                return DockerVolume("", None), Error(f"Failed to clone volume")
+            
+            container.remove(force=True)
+        except APIError as e:
+            return DockerVolume("", None), Error(f"Failed to clone volume: {e}")
+        except ImageNotFound as e:
+            return DockerVolume("", None), Error(f"Failed to clone volume: {e}")
+        except Exception as e:
+            return DockerVolume("", None), Error(f"Failed to clone volume: {e}")
 
         return new_volume, Error("")
 
 
-@dataclass
 class VolumeMountInfo:
-    path: str  # コンテナ内のマウント先のパス
-    volume: Volume  # マウントするボリュームの情報
+    path: str # コンテナ内のマウント先のパス
+    volume: DockerVolume  # マウントするボリュームの情報
     read_only: bool = False
+    
+    def __init__(self, path: str, volume: DockerVolume, read_only: bool = False):
+        self.path = path
+        self.volume = volume
+        self.read_only = read_only
 
 
 # Dockerコンテナの管理クラス
 class ContainerInfo:
     containerID: str  # コンテナID
-
-    def __init__(self, containerID: str):
-        self.containerID = containerID
+    _container: Container | None
+    cgroup_parent: str
+    
+    def __init__(self):
+        self._container = None
+        self.containerID = ""
+        self.cgroup_parent = ""
 
     # Dockerコンテナの作成
-    def create(
+    def _create(
         self,
-        containerName: str,
+        client: docker.DockerClient,
+        ImageName: str,
         arguments: list[str],
-        cpus: int = -1,
+        cgroupParent: str | None = CGROUP_PARENT,
+        user: str | None = f"{GUEST_UID}",
+        groups: list[str] | None = [f"{GUEST_GID}"],
+        cpuset: list[int] | None = None,
         memoryLimitMB: int = -1,
         stackLimitKB: int = -1,
         pidsLimit: int = -1,
         enableNetwork: bool = False,
         enableLoggingDriver: bool = True,
-        workDir: str = "/workdir/",
+        workDir: str = "/home/guest",
         volumeMountInfoList: list[VolumeMountInfo] = None,
     ) -> Error:
-        # docker create ...
-        args = ["create"]
-
-        # enable interactive
-        args += ["-i"]
-
-        args += ["--init"]
-
-        # CPUの割り当て数
-        if cpus > 0:
-            args += [f"--cpus={cpus}"]
-
-        # メモリ制限
-        if memoryLimitMB > 0:
-            args += [f"--memory={memoryLimitMB}m"]
-            args += [f"--memory-swap={memoryLimitMB}m"]
-
-        # スタックサイズの制限
+        
+        SANDBOX_LOGGER.info(f"cgroupParent: {cgroupParent}")
+        
+        ulimit_list: list[Ulimit] = []
+        
         if stackLimitKB > 0:
-            args += ["--ulimit", f"stack={stackLimitKB}:{stackLimitKB}"]
-
-        # プロセス数の制限
-        if pidsLimit > 0:
-            args += ["--pids-limit", str(pidsLimit)]
-
-        # ネットワークの有効化
-        if not enableNetwork:
-            args += ["--network", "none"]
-
-        # ロギングドライバの有効化
-        if not enableLoggingDriver:
-            args += ["--log-driver", "none"]
-
-        # 作業ディレクトリ
-        args += ["--workdir", workDir]
-
-        for volumeMountInfo in volumeMountInfoList:
-            if volumeMountInfo.read_only:
-                args += ["-v", f"{volumeMountInfo.volume.name}:{volumeMountInfo.path}:ro"]
-            else:
-                args += ["-v", f"{volumeMountInfo.volume.name}:{volumeMountInfo.path}"]
-
-        # コンテナイメージ名
-        args += [containerName]
-
-        # コンテナ内で実行するコマンド
-        args += arguments
-
-        # Dockerコンテナの作成コマンド
-        cmd = ["docker"] + args
-
-        SANDBOX_LOGGER.debug(f"docker create command: {cmd}")
-
-        # Dockerコンテナの作成
-        containerID = ""
-        err = ""
+            ulimit_list += [Ulimit(name="stack", soft=stackLimitKB, hard=stackLimitKB)]
+        
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            containerID = result.stdout.strip()
-        except subprocess.CalledProcessError as e:
-            err = f"Failed to create container: {e}"
-
-        SANDBOX_LOGGER.debug(f'containerID: {containerID}, err: "{err}"')
-
-        if err != "":
-            return Error(err)
-
-        self.containerID = containerID
+            container: Container = client.containers.create(
+                image=ImageName,
+                command=arguments,
+                cgroup_parent = cgroupParent if cgroupParent is not None else "system.slice",
+                user=user,
+                group_add=groups,
+                cpuset_cpus=",".join([str(cpu) for cpu in cpuset]) if cpuset is not None else None,
+                mem_limit=f"{memoryLimitMB}m" if memoryLimitMB > 0 else None,
+                memswap_limit=f"{memoryLimitMB}m" if memoryLimitMB > 0 else None,
+                ulimits=ulimit_list,
+                pids_limit=pidsLimit if pidsLimit > 0 else None,
+                network_disabled=not enableNetwork,
+                log_config=LogConfig(type=LogConfig.types.JSON) if enableLoggingDriver else None,
+                working_dir=workDir,
+                volumes={
+                    volume_mount_info.volume.name: {
+                        "bind": volume_mount_info.path,
+                        "mode": "rw" if not volume_mount_info.read_only else "ro"
+                    } for volume_mount_info in volumeMountInfoList  
+                },
+                stdin_open=True, # Keep STDIN open even if not attached (-iオプションに相当)
+            )
+            
+            self._container = container
+            self.containerID = container.id
+            self.cgroup_parent = cgroupParent if cgroupParent is not None else "system.slice"
+        except APIError as e:
+            return Error(f"Failed to create container: {e}")
+        except ImageNotFound as e:
+            return Error(f"Failed to create container: {e}")
+        except Exception as e:
+            return Error(f"Failed to create container: {e}")
+        
+        SANDBOX_LOGGER.debug(f'containerID: {self.containerID}, err: ""')
 
         return Error("")
 
     def remove(self) -> Error:
-        args = ["container", "rm", str(self.containerID)]
-
-        cmd = ["docker"] + args
-
-        err = ""
-
-        SANDBOX_LOGGER.debug(f"remove container command: {cmd}")
-
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            err = f"Failed to remove container: {e}"
+            self._container.remove(force=True)
+        except APIError as e:
+            return Error(f"Failed to remove container: {e}")
+        except ImageNotFound as e:
+            return Error(f"Failed to remove container: {e}")
+        except Exception as e:
+            return Error(f"Failed to remove container: {e}")
+        
+        SANDBOX_LOGGER.debug(f"remove container: {self.containerID}")
 
-        return Error(err)
+        return Error("")
 
     # ファイルのコピー
     def copyFile(self, srcInHost: Path, dstInContainer: Path) -> Error:
-        args = ["cp", str(srcInHost), f"{self.containerID}:{str(dstInContainer)}"]
-
-        cmd = ["docker"] + args
-
-        err = ""
-        
-        SANDBOX_LOGGER.debug(f"copy container command: {cmd}")
-
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            err = f"Failed to copy file: {e}"
+            with tempfile.TemporaryFile() as tmp:
+                tar = tarfile.open(fileobj=tmp, mode="w")
+                tar.add(srcInHost)
+                tar.close()
+                
+                tmp.seek(0)
+                self._container.put_archive(path=str(dstInContainer), data=tmp.read())
+        except APIError as e:
+            return Error(f"Failed to copy file: {e}")
+        except ImageNotFound as e:
+            return Error(f"Failed to copy file: {e}")
+        except Exception as e:
+            return Error(f"Failed to copy file: {e}")
 
-        return Error(err)
+        SANDBOX_LOGGER.debug(f"copy file: {srcInHost} -> {dstInContainer}")
+
+        return Error("")
 
 
 __MEM_USAGE_PATTERN = re.compile(r"^(\d+(\.\d+)?)([KMG]i?)B")
@@ -334,6 +347,8 @@ __MEM_USAGE_PATTERN = re.compile(r"^(\d+(\.\d+)?)([KMG]i?)B")
 
 # 時間・メモリ計測用のモニター
 class TaskMonitor:
+    cgroup_parent: str
+    _cgroup_path: Path
     startTime: int
     endTime: int
     maxUsedMemory: int  # 最大使用メモリ量[Byte]
@@ -342,11 +357,13 @@ class TaskMonitor:
     _monitor_thread: threading.Thread  # モニタリングスレッド
 
     def __init__(self, containerInfo: ContainerInfo):
+        self.cgroup_parent = containerInfo.cgroup_parent
         self.startTime = 0
         self.endTime = 0
         self.maxUsedMemory = 0
         self.containerInfo = containerInfo
         self._monitoring = False
+        self._cgroup_path = Path("/sys-host/fs/cgroup/") / self.cgroup_parent / f"docker-{containerInfo.containerID}.scope" / "memory.current"
 
     def start(self):
         self.startTime = time.time_ns()
@@ -434,15 +451,10 @@ class TaskMonitor:
     def __monitor_memory_usage_by_cgroup(self) -> None:
         # /sys/fs/cgroup/system.slice/docker-xxxxxx.scope/memory.current
         # からメモリ使用量をバイト単位で取得する
-        cgroup_path = (
-            Path("/sys-host/fs/cgroup/system.slice/")
-            / f"docker-{self.containerInfo.containerID}.scope"
-            / "memory.current"
-        )
         while self._monitoring:
             try:
-                if cgroup_path.exists():
-                    with cgroup_path.open("r") as f:
+                if self._cgroup_path.exists():
+                    with self._cgroup_path.open("r") as f:
                         mem_usage = int(f.read())
                         if mem_usage > self.maxUsedMemory:
                             self.maxUsedMemory = mem_usage
@@ -455,36 +467,36 @@ class TaskMonitor:
             time.sleep(0.001)
 
 
-@dataclass
-class TaskResult:
-    exitCode: int = -1
-    stdout: str = ""
-    stderr: str = ""
-    timeMS: int = -1
-    memoryByte: int = -1
-    TLE: bool = True  # 制限時間を超えたかどうか
+class TaskResult(BaseModel):
+    exitCode: int = Field(default=-1)
+    stdout: str = Field(default="")
+    stderr: str = Field(default="")
+    timeMS: int = Field(default=-1)
+    memoryByte: int = Field(default=-1)
+    TLE: bool = Field(default=True)  # 制限時間を超えたかどうか
 
 
 # タスクの実行情報
 @dataclass
 class TaskInfo:
-    name: str  # コンテナイメージ名
+    imageName: str  # コンテナイメージ名
     arguments: list[str] = field(default_factory=list)  # コンテナ内で実行するコマンド
-    timeoutSec: float = 0.0  # タイムアウト時間
-    cpus: int = 0  # CPUの割り当て数
-    memoryLimitMB: int = 0  # メモリ制限
-    stackLimitKB: int = 0  # リカージョンの深さを制限
-    pidsLimit: int = 0  # プロセス数の制限
-    enableNetwork: bool = False
-    enableLoggingDriver: bool = True
-    workDir: str = "/workdir/"  # コンテナ内での作業ディレクトリ
-    # cgroupをいじるにはroot権限が必要なので、現状は使わない
-    # cgroupParent: str  # cgroupの親ディレクトリ
+    timeoutSec: float = field(default=0.0)  # タイムアウト時間
+    user: str = field(default=f"{GUEST_UID}")
+    groups: list[str] = field(default_factory=lambda: [f"{GUEST_GID}"])
+    cpuset: list[int] | None = field(default=None)
+    memoryLimitMB: int = field(default=0)  # メモリ制限
+    stackLimitKB: int = field(default=0)  # リカージョンの深さを制限
+    pidsLimit: int = field(default=0)  # プロセス数の制限
+    enableNetwork: bool = field(default=False)
+    enableLoggingDriver: bool = field(default=True)
+    workDir: str = field(default="/home/guest")  # コンテナ内での作業ディレクトリ
+    cgroupParent: str = field(default=CGROUP_PARENT) # cgroupの親ディレクトリ
     volumeMountInfoList: list[VolumeMountInfo] = field(
         default_factory=list
     )  # ボリュームのマウント情報
     taskMonitor: TaskMonitor = field(
-        default_factory=lambda: TaskMonitor(ContainerInfo(""))
+        default_factory=lambda: TaskMonitor(ContainerInfo())
     )
 
     Stdin: str = ""  # 標準入力
@@ -492,14 +504,19 @@ class TaskInfo:
     Stderr: str = ""  # 標準エラー出力
 
     # Dockerコンテナの作成
-    def __create(self) -> tuple[ContainerInfo, Error]:
+    def __create(self, client: docker.DockerClient) -> tuple[ContainerInfo, Error]:
         # docker create ...
-        containerInfo = ContainerInfo("")
+        containerInfo = ContainerInfo()
 
-        err = containerInfo.create(
-            containerName=self.name,
+        # Dockerコンテナの作成
+        err = containerInfo._create(
+            client=client,
+            ImageName=self.imageName,
             arguments=self.arguments,
-            cpus=self.cpus,
+            cgroupParent=self.cgroupParent,
+            user=self.user,
+            groups=self.groups,
+            cpuset=self.cpuset,
             memoryLimitMB=self.memoryLimitMB,
             stackLimitKB=self.stackLimitKB,
             pidsLimit=self.pidsLimit,
@@ -509,36 +526,22 @@ class TaskInfo:
             volumeMountInfoList=self.volumeMountInfoList,
         )
 
-        # Dockerコンテナの作成
-        SANDBOX_LOGGER.debug(
-            f'containerID: {containerInfo.containerID}, err: "{err.message}"'
-        )
-
         if err.message != "":
-            return ContainerInfo(""), err
+            SANDBOX_LOGGER.debug(
+                f'containerID: {containerInfo.containerID}, err: "{err.message}"'
+            )
+            return ContainerInfo(), err
 
         # モニターにコンテナ情報を設定
-        self.taskMonitor.containerInfo = containerInfo
+        self.taskMonitor = TaskMonitor(
+            containerInfo=containerInfo
+        )
 
         return containerInfo, Error("")
 
     # docker start ... を実行して、コンテナを起動する。
     # これにより、docker createで指定したコマンド(コンパイル、プログラムの実行等)が実行される。
     def __start(self, containerInfo: ContainerInfo) -> tuple[TaskResult, Error]:
-        # docker start
-        args = ["start"]
-
-        # enable interactive
-        args += ["-i"]
-
-        # コンテナID
-        args += [containerInfo.containerID]
-
-        # Dockerコンテナの起動コマンド
-        cmd = ["docker"] + args
-
-        SANDBOX_LOGGER.debug(f"docker start command: {cmd}")
-
         # self.timeout + 500msの制限時間を設定
         timeout = 30.0  # デフォルトは30秒
         if self.timeoutSec != 0.0:
@@ -549,26 +552,30 @@ class TaskInfo:
 
         # Dockerコンテナの起動
         TLE = False
+        result = None
         try:
+            # docker sdkのstartは、-i(interactive)オプションなどついていない
+            # subprocess.runで"docker start"コマンドを直接実行する
             ProcessResult = subprocess.run(
-                cmd,
+                args=["docker", "start", "-i", containerInfo.containerID],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 input=self.Stdin,
                 check=False,
             )
+            # 戻り値を検出
+            SANDBOX_LOGGER.debug(f"result: {ProcessResult}")
         except subprocess.TimeoutExpired:
             # タイムアウトした場合
             # モニターを終了(これをしないとtaskMonitorのスレッドが終了しない)
             self.taskMonitor.end()
 
             # まだ実行中の場合があるので、docker kill...で停止させる。
-            stop_cmd = ["docker", "kill", containerInfo.containerID]
-            SANDBOX_LOGGER.debug(stop_cmd)
-            resultForStop = subprocess.run(stop_cmd, check=False, capture_output=True)
-            if resultForStop.returncode != 0:
-                message = f"failed to stop docker: {containerInfo.containerID}"
+            try:
+                containerInfo._container.kill()
+            except APIError as e:
+                message = f"failed to stop docker: {e}"
                 SANDBOX_LOGGER.error(message)
                 SANDBOX_LOGGER.debug(message)
                 return TaskResult(
@@ -576,16 +583,18 @@ class TaskInfo:
                     timeMS=int(self.taskMonitor.get_elapsed_time_ms()),
                     memoryByte=self.taskMonitor.get_used_memory_byte(),
                 ), Error(message)
-            # 戻り値を検出
-            exit_code, err = inspectExitCode(containerId=containerInfo.containerID)
-            if err.message != "":
+
+            result = containerInfo._container.wait()
+            exit_code: int = result["StatusCode"]
+            err_message: str = "" if "Error" not in result else result["Error"]["Message"]
+            if err_message != "":
                 return (
                     TaskResult(
                         TLE=True,
                         timeMS=int(self.taskMonitor.get_elapsed_time_ms()),
                         memoryByte=self.taskMonitor.get_used_memory_byte(),
                     ),
-                    err,
+                    Error(err_message),
                 )
             return TaskResult(
                 exitCode=exit_code,
@@ -594,13 +603,12 @@ class TaskInfo:
                 memoryByte=self.taskMonitor.get_used_memory_byte(),
             ), Error("")
 
-        SANDBOX_LOGGER.debug(ProcessResult)
-
         # モニターを終了
         self.taskMonitor.end()
 
-        self.Stdout = ProcessResult.stdout
-        self.Stderr = ProcessResult.stderr
+        # 標準出力、標準エラー出力を取得
+        self.Stdout = containerInfo._container.logs(stdout=True, stderr=False).decode("utf-8")
+        self.Stderr = containerInfo._container.logs(stdout=False, stderr=True).decode("utf-8")
 
         # タイムアウトしたかどうか
         if (
@@ -609,9 +617,13 @@ class TaskInfo:
         ):
             TLE = True
 
-        exit_code, err = inspectExitCode(containerId=containerInfo.containerID)
-        if err.message != "":
-            return TaskResult(), err
+        # 終了コードを取得
+        result = containerInfo._container.wait()
+        SANDBOX_LOGGER.debug(f"result: {result}")
+        exit_code = result["StatusCode"]
+        err_message = "" if "Error" not in result else result["Error"]["Message"]
+        if err_message != "":
+            return TaskResult(), Error(err_message)
 
         return TaskResult(
             exitCode=exit_code,
@@ -622,10 +634,10 @@ class TaskInfo:
             TLE=TLE,
         ), Error("")
 
-    def run(self) -> tuple[TaskResult, Error]:
+    def run(self, client: docker.DockerClient) -> tuple[TaskResult, Error]:
         # コンテナ作成から起動までの処理を行う
         # 途中で失敗したら、作成したコンテナの削除を行い、エラーを返す
-        containerInfo, err = self.__create()
+        containerInfo, err = self.__create(client=client)
         SANDBOX_LOGGER.debug(
             f'containerID: {containerInfo.containerID}, err: "{err.message}"'
         )
@@ -635,7 +647,7 @@ class TaskInfo:
         SANDBOX_LOGGER.debug(f"containerID: {containerInfo.containerID}")
 
         SANDBOX_LOGGER.debug("start container")
-        result, err = self.__start(containerInfo)
+        result, err = self.__start(containerInfo=containerInfo)
 
         # コンテナの削除
         err2 = containerInfo.remove()
