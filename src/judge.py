@@ -233,13 +233,14 @@ class JudgeInfo:
                 return judge_result_list
 
             # TLEチェック
-            if result.TLE:
+            if result.TLE or result.timeMS > self.problem_record.timeMS:
                 judge_result.result = records.SingleJudgeStatus.TLE
             # MLEチェック
             elif result.memoryByte + 1024 * 1024 > self.problem_record.memoryMB * 1024 * 1024:
                 judge_result.result = records.SingleJudgeStatus.MLE
             # RE(Runtime Errorチェック)
-            elif result.exitCode != expected_exit_code:
+            elif testcase.exit_code == 0 and result.exitCode != 0:
+                # テストケースは正常終了を想定しているが、実行結果は異常終了した場合
                 judge_result.result = records.SingleJudgeStatus.RE
             # Wrong Answerチェック
             elif not (
@@ -248,6 +249,11 @@ class JudgeInfo:
             ) or not (
                 expected_stderr is not None
                 and StandardChecker.match(expected_stderr, result.stderr)
+            ) or not (
+                # 何等かの異常をプログラムが検知できるかチェック
+                # テストケースは異常終了を想定しているが、実行結果は正常終了した場合
+                # そのプログラムは異常検知できていないため、WAとする。
+                testcase.exit_code != 0 and result.exitCode == 0
             ):
                 judge_result.result = records.SingleJudgeStatus.WA
             else:
