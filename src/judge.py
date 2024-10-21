@@ -130,8 +130,8 @@ class JudgeInfo:
                         timeMS=result.timeMS,
                         memoryKB=result.memoryByte / 1024,
                         exit_code=result.exitCode,
-                        stdout=result.stdout,
-                        stderr=result.stderr
+                        stdout=result.stdout[:256], # 256文字までクリップ
+                        stderr=result.stderr[:256] # 256文字までクリップ
                     )
 
             # 進捗状況を更新
@@ -216,8 +216,8 @@ class JudgeInfo:
                         timeMS=result.timeMS,
                         memoryKB=result.memoryByte / 1024,
                         exit_code=result.exitCode,
-                        stdout=result.stdout,
-                        stderr=result.stderr
+                        stdout=result.stdout[:256], # 256文字までクリップ
+                        stderr=result.stderr[:256] # 256文字までクリップ
                     )
 
             # 進捗状況を更新
@@ -249,13 +249,15 @@ class JudgeInfo:
             ) or not (
                 expected_stderr is not None
                 and StandardChecker.match(expected_stderr, result.stderr)
-            ) or not (
-                # 何等かの異常をプログラムが検知できるかチェック
-                # テストケースは異常終了を想定しているが、実行結果は正常終了した場合
-                # そのプログラムは異常検知できていないため、WAとする。
-                testcase.exit_code != 0 and result.exitCode == 0
             ):
                 judge_result.result = records.SingleJudgeStatus.WA
+            elif testcase.exit_code != 0:
+                # テストケースは異常終了を想定しているが、実行結果は正常終了した場合
+                # そのプログラムは異常検知できていないため、WAとする。
+                if result.exitCode == 0:
+                    judge_result.result = records.SingleJudgeStatus.WA
+                else:
+                    judge_result.result = records.SingleJudgeStatus.AC
             else:
                 # AC(正解)
                 judge_result.result= records.SingleJudgeStatus.AC
@@ -411,6 +413,7 @@ class JudgeInfo:
             self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
             self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
             self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
+            self.submission_record.result = max(self.submission_record.result, records.SubmissionSummaryStatus[exec_result.result.value])
             
             if exec_result.result != records.SingleJudgeStatus.AC:
                 corresponding_testcase = testcase_dict[exec_result.testcase_id]
