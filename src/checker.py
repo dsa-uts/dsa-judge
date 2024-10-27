@@ -21,7 +21,7 @@ class StandardChecker:
         ls_lines = [line for line in ls_lines if line != '']
         rs_lines = [line for line in rs_lines if line != '']
                 
-        print(f"ls: {ls_lines}, rs: {rs_lines}")
+        # print(f"ls: {ls_lines}, rs: {rs_lines}")
 
         # 行数が異なる場合はFalse
         if len(ls_lines) != len(rs_lines):
