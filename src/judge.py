@@ -243,12 +243,12 @@ class JudgeInfo:
                 # テストケースは正常終了を想定しているが、実行結果は異常終了した場合
                 judge_result.result = records.SingleJudgeStatus.RE
             # Wrong Answerチェック
-            elif not (
+            elif (
                 expected_stdout is not None
-                and StandardChecker.match(expected_stdout, result.stdout)
-            ) or not (
+                and not StandardChecker.match(expected_stdout, result.stdout)
+            ) or (
                 expected_stderr is not None
-                and StandardChecker.match(expected_stderr, result.stderr)
+                and not StandardChecker.match(expected_stderr, result.stderr)
             ):
                 judge_result.result = records.SingleJudgeStatus.WA
             elif testcase.exit_code != 0:
