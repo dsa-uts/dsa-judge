@@ -128,7 +128,7 @@ class JudgeInfo:
                         result=records.SingleJudgeStatus.AC,
                         command=' '.join(args),
                         timeMS=result.timeMS,
-                        memoryKB=result.memoryByte / 1024,
+                        memoryKB=result.memoryByte // 1024,
                         exit_code=result.exitCode,
                         stdout=result.stdout[:256], # 256文字までクリップ
                         stderr=result.stderr[:256] # 256文字までクリップ
@@ -214,7 +214,7 @@ class JudgeInfo:
                         result=records.SingleJudgeStatus.AC,
                         command=' '.join(args),
                         timeMS=result.timeMS,
-                        memoryKB=result.memoryByte / 1024,
+                        memoryKB=result.memoryByte // 1024,
                         exit_code=result.exitCode,
                         stdout=result.stdout[:256], # 256文字までクリップ
                         stderr=result.stderr[:256] # 256文字までクリップ
