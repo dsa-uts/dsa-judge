@@ -112,7 +112,9 @@ def test_Stdout():
         groups=[GUEST_GID],
         workDir="/home/guest",
         memoryLimitMB=256,
-    )    
+    )
+    err = container.start()
+    assert err.message == ""
 
     result, err = container.exec_run(
         command=["echo", "dummy"],
@@ -204,6 +206,43 @@ def test_SleepTime():
     assert err.message == ""
 
 
+# コンテナにファイルがコピーできているか確かめるテスト
+def test_FileCopy():
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=256,
+    )
+    err = container.start()
+    assert err.message == ""
+    
+    with TemporaryDirectory() as tmpdir:
+        with open(Path(tmpdir) / "dummy.txt", "w") as f:
+            f.write("dummy\n")
+        
+        err = container.copyFile(srcInHost=Path(tmpdir) / "dummy.txt", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
+    
+    res, err = container.exec_run(
+        command=["cat", "/home/guest/dummy.txt"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
+    assert err.message == ""
+    assert res.exitCode == 0
+    assert res.stdout == "dummy\n"
+    assert res.stderr == ""
+    
+    err = container.remove()
+    assert err.message == ""
+
 # タイムアウトをきちんと検出できているか確かめるテスト
 def test_Timeout():
     client = docker.client.from_env()
@@ -217,6 +256,8 @@ def test_Timeout():
         workDir="/home/guest",
         memoryLimitMB=256,
     )
+    err = container.start()
+    assert err.message == ""
     
     result, err = container.exec_run(
         command=["sleep", "100"],
@@ -228,12 +269,16 @@ def test_Timeout():
     test_logger.info(result)
     test_logger.info(err)
 
-    assert err.message == ""
+    assert err.message != ""
     assert result.timeMS >= 2000 and result.timeMS <= 5000
+    
+    # コンテナがkillされたので、コンテナを再起動
+    err = container.start()
+    assert err.message == ""
     
     # WatchDogを用いて、タイムアウトを検出できるか確かめる
     task_info = TaskInfo(
-        command=["sleep", "100"],
+        command="sleep 100",
         stdin="",
         timeoutSec=3.0,
         memoryLimitMB=256,
@@ -310,7 +355,7 @@ def test_MemoryLimit():
     
     # WatchDogを用いて、メモリ制限を検出できるか確かめる
     task_info = TaskInfo(
-        command=["dd", "if=/dev/zero", "of=/dev/null", "bs=800M"],
+        command="dd if=/dev/zero of=/dev/null bs=800M",
         stdin="",
         timeoutSec=3.0,
         memoryLimitMB=500,

@@ -93,7 +93,7 @@ class ContainerInfo:
     def __init__(
         self,
         client: docker.DockerClient,
-        ImageName: str,
+        imageName: str,
         arguments: list[str],
         interactive: bool = False,
         cgroupParent: str | None = None,
@@ -114,7 +114,7 @@ class ContainerInfo:
             ulimit_list += [Ulimit(name="stack", soft=stackLimitKB, hard=stackLimitKB)]
         
         container: Container = client.containers.create(
-            image=ImageName,
+            image=imageName,
             command=arguments,
             cgroup_parent=cgroupParent if cgroupParent is not None else None,
             user=user,
@@ -131,8 +131,8 @@ class ContainerInfo:
                 volume_mount_info.volume.name: {
                     "bind": volume_mount_info.path,
                     "mode": "rw" if not volume_mount_info.read_only else "ro"
-                } for volume_mount_info in volumeMountInfoList  
-            },
+                } for volume_mount_info in volumeMountInfoList
+            } if volumeMountInfoList is not None else None,
             stdin_open=interactive,
         )
         
@@ -159,13 +159,14 @@ class ContainerInfo:
     # ファイルのコピー
     def copyFile(self, srcInHost: Path, dstInContainer: Path) -> Error:
         try:
-            with tempfile.TemporaryFile() as tmp:
+            with tempfile.TemporaryFile(suffix=".tar") as tmp:
                 tar = tarfile.open(fileobj=tmp, mode="w")
-                tar.add(srcInHost)
+                tar.add(srcInHost, arcname=srcInHost.name)
                 tar.close()
                 
                 tmp.seek(0)
-                self._container.put_archive(path=str(dstInContainer), data=tmp.read())
+                if not self._container.put_archive(path=str(dstInContainer), data=tmp.read()):
+                    return Error("Failed to put archive")
         except APIError as e:
             return Error(f"Failed to copy file: {e}")
         except ImageNotFound as e:
@@ -202,41 +203,41 @@ class ContainerInfo:
         try:
             result = ExecRunResult()
             error = Error("")
+            execution_completed = threading.Event()
             
             def run_command():
+                start_time = time.monotonic()
                 exec_result = self._container.exec_run(
                     cmd=command,
                     user=user,
                     demux=True
                 )
+                end_time = time.monotonic()
+                result.timeMS = int((end_time - start_time) * 1000)
                 result.exitCode = exec_result.exit_code
                 stdout_data, stderr_data = exec_result.output
                 result.stdout = stdout_data.decode() if stdout_data else ""
                 result.stderr = stderr_data.decode() if stderr_data else ""
                 
+                execution_completed.set()
+                
             # コマンド実行用スレッドを開始
             thread = threading.Thread(target=run_command)
             thread.start()
-            # 指定したタイムアウト時間だけ待機
-            thread.join(timeout=timeoutSec)
             
-            # タイムアウトした場合はコンテナをkillする
-            if thread.is_alive():
+            # タイムアウトまで待機、完了したら即座に終了
+            if not execution_completed.wait(timeout=timeoutSec):
                 self._container.kill()
                 error = Error(f"Command timed out after {timeoutSec} seconds. Container killed.")
                 thread.join()
-            else:
-                error = Error("")
             
-            SANDBOX_LOGGER.debug(f"exec_run: {' '.join(command)}, err: {error}")
-            
-            # 
+            SANDBOX_LOGGER.debug(f"exec_run: {' '.join(command)}, err: {error}") 
             
             return result, error
         except APIError as e:
-            return Error(f"Failed to exec_run: {e}")
+            return ExecRunResult(), Error(f"Failed to exec_run: {e}")
         except Exception as e:
-            return Error(f"Failed to exec_run: {e}")
+            return ExecRunResult(), Error(f"Failed to exec_run: {e}")
         
 
 class ExecRunResult(BaseModel):
