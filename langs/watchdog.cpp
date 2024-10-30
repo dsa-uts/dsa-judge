@@ -32,6 +32,10 @@ json readFromStdin() {
 
 json readFromFile(const std::string& filename) {
   std::ifstream file(filename);
+  if (!file.is_open()) {
+    std::perror("Failed to open file");
+    exit(1);
+  }
   std::string jsonString((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
   return json::parse(jsonString);
 }
