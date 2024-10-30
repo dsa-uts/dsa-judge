@@ -4,6 +4,13 @@ RUN apt-get update; \
     apt-get install -y --no-install-recommends gcc make libc6-dev; \
     rm -rf /var/lib/apt/lists/*
 
+# watchdogをコピー
+# uid:gid=root:rootで、ファイルのパーミッションは700にする
+COPY watchdog /home/guest/watchdog
+RUN chown root:root /home/guest/watchdog
+RUN chmod 700 /home/guest/watchdog
+
+# ゲストユーザー(1000:1000)のホームディレクトリを作成
 RUN mkdir -p /home/guest
 RUN chown -R 1000:1000 /home/guest
 RUN chmod -R 755 /home/guest
