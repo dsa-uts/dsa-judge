@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sstream>
+#include <vector>
+#include <string>
 
 using json = nlohmann::json;
 
@@ -40,6 +42,42 @@ json readFromFile(const std::string& filename) {
   return json::parse(jsonString);
 }
 
+std::vector<pid_t> get_child_pids(pid_t parent_pid) {
+  std::vector<pid_t> children;
+  std::string cmd = std::string("pgrep -P ") + std::to_string(parent_pid);
+
+  // コマンドを実行
+  FILE* stream = popen(cmd.c_str(), "r");
+  if (!stream) {
+    throw std::runtime_error("popen failed");
+  }
+
+  char buffer[128];
+  while (fgets(buffer, sizeof(buffer), stream) != nullptr) {
+    pid_t pid = std::stoi(std::string(buffer));
+    children.push_back(pid);
+  }
+
+  pclose(stream);
+  return children;
+}
+
+void kill_recursive(pid_t pid) {
+  try {
+    // まず子プロセスを終了
+    std::vector<pid_t> children = get_child_pids(pid);
+    for (pid_t child : children) {
+      kill_recursive(child);
+    }
+
+    // 対象プロセスを終了
+    if (kill(pid, SIGKILL) < 0) {
+      std::cerr << "Failed to kill process " << pid << std::endl;
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "Error in kill_recursive: " << e.what() << std::endl;
+  }
+}
 
 int main(int argc, char** argv) {
   json jsonData;
@@ -76,6 +114,14 @@ int main(int argc, char** argv) {
   } catch (const json::out_of_range& e) {
     std::printf("Key not found: %s\n", e.what());
     exit(1);
+  }
+
+  std::vector<std::string> args;
+  // commandを空白で分割
+  std::string token;
+  std::istringstream token_stream(command);
+  while (token_stream >> token) {
+    args.push_back(token);
   }
 
   int exit_code = -1;
@@ -144,16 +190,24 @@ int main(int argc, char** argv) {
         ptr += written;
       }
       close(stdin_pipe[1]);
+      // printf("stdin child finished\n");
       exit(0);
     } else {
       // 子プロセスの標準入力を設定
       close(stdin_pipe[1]);
+      close(STDIN_FILENO);
       dup2(stdin_pipe[0], STDIN_FILENO);
       close(stdin_pipe[0]);
 
+      char** argv = new char*[args.size() + 1];
+      for (size_t i = 0; i < args.size(); i++) {
+        argv[i] = const_cast<char*>(args[i].c_str());
+      }
+      argv[args.size()] = NULL;
+
       // コマンドを実行
-      execl("/bin/sh", "sh", "-c", command.c_str(), NULL);
-      std::perror("execl failed");
+      execvp(argv[0], argv);
+      std::perror("execvp failed");
       exit(1);
     }
   } else {
@@ -167,11 +221,16 @@ int main(int argc, char** argv) {
 
     // タイムアウト用のタイマースレッド
     std::thread timeout_thread([&]() {
-      while (!finished.load()) { 
+      while (!finished.load()) {
         auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count() >= timeoutSec) {
+        // printf("%ldms elapsed, finished: %d\n", std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count(), finished.load());
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() >= timeoutSec * 1000) {
           // タイムアウト
-          kill(pid, SIGKILL);
+          // printf("timeout, kill %d\n", pid);
+          // shで実行している場合、子プロセスが残っているため、再帰的に終了する必要がある。
+          // そうしないと、子プロセスが実行され続けてしまうし、stdoutやstderrがパイプにEOFが送られない。
+          kill_recursive(pid);
+          // printf("waitpid: %d\n", waitpid(pid, NULL, 0));
           break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -195,7 +254,7 @@ int main(int argc, char** argv) {
 
         if (current_memory > static_cast<int64_t>(memoryLimitMB) * 1024 * 1024) {
           // メモリ制限超過
-          kill(pid, SIGKILL);
+          kill_recursive(pid);
           break;
         }
 
@@ -209,11 +268,13 @@ int main(int argc, char** argv) {
     waitpid(pid, &status, 0);
     finished.store(true);
     monitor_thread.join();
+    // printf("monitor thread finished\n");
     // 実行時間を計算
     auto end_time = std::chrono::steady_clock::now();
     timeMS = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
     timeout_thread.join();
+    // printf("timeout thread finished\n");
 
     // 最大メモリ使用量 (KB)
     memoryKB = static_cast<int>(max_memory) / 1024;
@@ -227,12 +288,14 @@ int main(int argc, char** argv) {
       stdout_stream.write(buffer, count);
     }
     stdout_str = stdout_stream.str();
+    // printf("stdout: %s\n", stdout_str.c_str());
 
     std::ostringstream stderr_stream;
     while ((count = read(stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
       stderr_stream.write(buffer, count);
     }
     stderr_str = stderr_stream.str();
+    // printf("stderr: %s\n", stderr_str.c_str());
 
     close(stdout_pipe[0]);
     close(stderr_pipe[0]);
