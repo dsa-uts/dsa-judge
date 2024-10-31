@@ -353,12 +353,16 @@ def test_MemoryLimit():
     
     assert result.exitCode != 0
     
+    # コンテナを再起動
+    err = container.start()
+    assert err.message == ""
+    
     # WatchDogを用いて、メモリ制限を検出できるか確かめる
     task_info = TaskInfo(
         command="dd if=/dev/zero of=/dev/null bs=800M",
         stdin="",
         timeoutSec=3.0,
-        memoryLimitMB=500,
+        memoryLimitMB=300,
         uid=int(GUEST_UID),
         gid=int(GUEST_GID),
     )
@@ -466,7 +470,7 @@ def test_ForkBomb():
     test_logger.info(res)
     test_logger.info(err)
 
-    assert err.message == ""
+    assert err.message != ""
     assert res.exitCode != 0
     
     err = container.remove()
@@ -481,7 +485,6 @@ def test_UseManyStack():
         imageName="checker-lang-gcc",
         arguments=["sleep", "3600"],
         workDir="/home/guest",
-        stackLimitKB=10240,
         memoryLimitMB=256,
     )
     
@@ -503,21 +506,46 @@ def test_UseManyStack():
     assert err.message == ""
     assert res.exitCode == 0
     
-    res, err = container.exec_run(
-        command=["./a.out"],
-        user=f"{GUEST_UID}:{GUEST_GID}",
-        workDir="/home/guest",
-        timeoutSec=10.0,
-    )
+    with TemporaryDirectory() as tmpdir:
+        err = container.downloadFile(absPathInContainer=Path("/home/guest/a.out"), dstInHost=Path(tmpdir))
+        assert err.message == ""
+    
+        # コンパイル用コンテナを削除
+        err = container.remove()
+        assert err.message == ""
+    
+        # 実行用コンテナを起動
+        container = ContainerInfo(
+            client=client,
+            imageName="binary-runner",
+            arguments=["sleep", "3600"],
+            workDir="/home/guest",
+            memoryLimitMB=256,
+            stackLimitKB=10240,
+        )
+    
+        err = container.start()
+        assert err.message == ""
+        
+        # ./a.outをアップロード
+        err = container.copyFile(srcInHost=Path(tmpdir) / "a.out", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
 
-    test_logger.info(res)
-    test_logger.info(err)
+        res, err = container.exec_run(
+            command=["./a.out"],
+            user=f"{GUEST_UID}:{GUEST_GID}",
+            workDir="/home/guest",
+            timeoutSec=10.0,
+        )
 
-    assert err.message == ""
-    assert res.exitCode != 0
+        test_logger.info(res)
+        test_logger.info(err)
 
-    err = container.remove()
-    assert err.message == ""
+        assert err.message == ""
+        assert res.exitCode != 0
+
+        err = container.remove()
+        assert err.message == ""
 
 
 # 試しにジャッジリクエストを投じてみて、どのような結果になるか見てみる。

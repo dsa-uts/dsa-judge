@@ -147,8 +147,6 @@ class ContainerInfo:
             self._container.remove(force=True)
         except APIError as e:
             return Error(f"Failed to remove container: {e}")
-        except ImageNotFound as e:
-            return Error(f"Failed to remove container: {e}")
         except Exception as e:
             return Error(f"Failed to remove container: {e}")
         
@@ -169,13 +167,28 @@ class ContainerInfo:
                     return Error("Failed to put archive")
         except APIError as e:
             return Error(f"Failed to copy file: {e}")
-        except ImageNotFound as e:
-            return Error(f"Failed to copy file: {e}")
         except Exception as e:
             return Error(f"Failed to copy file: {e}")
 
         SANDBOX_LOGGER.debug(f"copy file: {srcInHost} -> {dstInContainer}")
 
+        return Error("")
+    
+    def downloadFile(self, absPathInContainer: Path, dstInHost: Path) -> Error:
+        try:
+            stream, stat = self._container.get_archive(path=str(absPathInContainer))
+            with tempfile.TemporaryFile(suffix=".tar") as tmp:
+                for chunk in stream:
+                    tmp.write(chunk)
+                
+                tmp.seek(0)
+                with tarfile.open(fileobj=tmp, mode="r") as tar:
+                    tar.extractall(path=str(dstInHost))
+        except APIError as e:
+            return Error(f"Failed to download file: {e}")
+        except Exception as e:
+            return Error(f"Failed to download file: {e}")
+        
         return Error("")
     
     def start(self) -> Error:
