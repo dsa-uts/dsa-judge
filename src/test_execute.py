@@ -280,7 +280,7 @@ def test_Timeout():
     task_info = TaskInfo(
         command="sleep 100",
         stdin="",
-        timeoutSec=3.0,
+        timeoutMS=3000,
         memoryLimitMB=256,
         uid=int(GUEST_UID),
         gid=int(GUEST_GID),
@@ -361,7 +361,7 @@ def test_MemoryLimit():
     task_info = TaskInfo(
         command="dd if=/dev/zero of=/dev/null bs=800M",
         stdin="",
-        timeoutSec=3.0,
+        timeoutMS=3000,
         memoryLimitMB=300,
         uid=int(GUEST_UID),
         gid=int(GUEST_GID),

@@ -84,12 +84,15 @@ class JudgeInfo:
                 args += ' '
                 args += ' '.join(testcase.args.strip().split())
 
-            # NOTE) コンパイル時は、標準入力は受け付けないものとする。
+            stdin = ""
+            if testcase.stdin_path is not None:
+                with open(RESOURCE_DIR / Path(testcase.stdin_path), mode='r', encoding='utf-8') as f:
+                    stdin = f.read()
             
             task_info = TaskInfo(
                 command=args,
-                stdin="",
-                timeoutSec=2,
+                stdin=stdin,
+                timeoutMS=2000,
                 memoryLimitMB=512,
                 uid=int(GUEST_UID),
                 gid=int(GUEST_GID)
@@ -228,7 +231,7 @@ class JudgeInfo:
                 args += ' '.join(testcase.args.strip().split())
 
             # 標準入力、想定される標準出力・標準エラー出力の取得
-            stdin = None
+            stdin = ""
             expected_stdout = None
             expected_stderr = None
             expected_terminate_normally = True if testcase.exit_code == 0 else False
@@ -248,7 +251,7 @@ class JudgeInfo:
             task_info = TaskInfo(
                 command=args,
                 stdin=stdin,
-                timeoutSec=self.problem_record.timeMS / 1000,
+                timeoutMS=self.problem_record.timeMS,
                 memoryLimitMB=self.problem_record.memoryMB,
                 uid=int(GUEST_UID),
                 gid=int(GUEST_GID)
@@ -349,7 +352,7 @@ class JudgeInfo:
             if judge_result.timeMS > self.problem_record.timeMS:
                 judge_result.result = records.SingleJudgeStatus.TLE
             # MLEチェック
-            elif judge_result.memoryKB * 1024 + 1024 > self.problem_record.memoryMB * 1024:
+            elif judge_result.memoryKB * 1024 + 1024 > self.problem_record.memoryMB * 1024 * 1024:
                 judge_result.result = records.SingleJudgeStatus.MLE
             # RE(Runtime Errorチェック)
             elif expected_terminate_normally and judge_result.exit_code != 0:
@@ -358,10 +361,10 @@ class JudgeInfo:
             # Wrong Answerチェック
             elif (
                 expected_stdout is not None
-                and not StandardChecker.match(expected_stdout, result.stdout)
+                and not StandardChecker.match(expected_stdout, watchdog_result.stdout)
             ) or (
                 expected_stderr is not None
-                and not StandardChecker.match(expected_stderr, result.stderr)
+                and not StandardChecker.match(expected_stderr, watchdog_result.stderr)
             ):
                 judge_result.result = records.SingleJudgeStatus.WA
             elif not expected_terminate_normally and judge_result.exit_code == 0:
@@ -581,9 +584,19 @@ class JudgeInfo:
             pidsLimit=100,
             workDir="/home/guest",
             volumeMountInfoList=[
-                VolumeMountInfo(path="/home/guest", volume=working_volume, read_only=True)
+                VolumeMountInfo(path="/home/guest", volume=working_volume, read_only=False)
             ]
         )
+        
+        # コンテナを起動する
+        err = sandbox_container_info.start()
+        if not err.silence():
+            judge_logger.error(f"failed to start sandbox container: {sandbox_container_info._container.id}")
+            return self._closing_procedure(
+                submission_record=self.submission_record,
+                container=None,
+                working_volume=working_volume
+            )
 
         # Judgeテストケース(実行・チェック)を実行する
         judge_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Judge]

@@ -264,7 +264,7 @@ class ExecRunResult(BaseModel):
 class TaskInfo(BaseModel):
     command: str
     stdin: str
-    timeoutSec: int
+    timeoutMS: int
     memoryLimitMB: int
     uid: int
     gid: int

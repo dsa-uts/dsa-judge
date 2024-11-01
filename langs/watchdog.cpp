@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
    * {
    *   "command": "cmd [args...]",
    *   "stdin": "stdin data",
-   *   "timeoutSec": 3,
+   *   "timeoutMS": 3000,
    *   "memoryLimitMB": 1024,
    *   "uid": 1000,
    *   "gid": 1000
@@ -100,14 +100,14 @@ int main(int argc, char** argv) {
    */
   std::string command;
   std::string stdin;
-  int timeoutSec = 0;
+  int timeoutMS = 0;
   int memoryLimitMB = 0;
   int uid = 0;
   int gid = 0;
   try {
     command = jsonData.at("command");
     stdin = jsonData.at("stdin");
-    timeoutSec = jsonData.at("timeoutSec");
+    timeoutMS = jsonData.at("timeoutMS");
     memoryLimitMB = jsonData.at("memoryLimitMB");
     uid = jsonData.at("uid");
     gid = jsonData.at("gid");
@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
       while (!finished.load()) {
         auto now = std::chrono::steady_clock::now();
         // printf("%ldms elapsed, finished: %d\n", std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count(), finished.load());
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() >= timeoutSec * 1000) {
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() >= timeoutMS) {
           // タイムアウト
           // printf("timeout, kill %d\n", pid);
           // shで実行している場合、子プロセスが残っているため、再帰的に終了する必要がある。
@@ -315,7 +315,7 @@ int main(int argc, char** argv) {
     result["stderr"] = stderr_str;
     result["timeMS"] = timeMS;
     result["memoryKB"] = memoryKB;
-    result["TLE"] = timeoutSec > 0 && timeMS >= timeoutSec * 1000;
+    result["TLE"] = timeoutMS > 0 && timeMS >= timeoutMS;
     result["MLE"] = memoryLimitMB > 0 && memoryKB / 1024 >= memoryLimitMB;
     std::cout << result.dump(4) << std::endl;
   }
