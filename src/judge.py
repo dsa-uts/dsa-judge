@@ -206,7 +206,7 @@ class JudgeInfo:
             # それは、Makefileによるビルドログの出力まで一致確認するのは厳格すぎるから。
 
             # コンパイルエラーかチェック
-            if result.exitCode != 0:
+            if watchdog_result.exit_code != 0:
                 judge_result.result = records.SingleJudgeStatus.CE
 
             # TestCaseで設定されていたコンパイルジョブが正常に実行完了した
@@ -555,6 +555,7 @@ class JudgeInfo:
             self.submission_record.result = records.SubmissionSummaryStatus.CE
             self.submission_record.message += "実行ファイルが出力されていません\n"
             self.submission_record.detail += f"{' '.join(not_found_executable_set)}\n"
+            self.submission_record.judge_results = judge_result_list
             # submission_summary_record.score = (total sum)
             return self._closing_procedure(
                 submission_record=self.submission_record,
