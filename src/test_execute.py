@@ -2,16 +2,18 @@
 # $ cd src
 # $ pytest --log-cli-level=INFO test_execute.py
 import pytest
-import sandbox
-from sandbox.execute import TaskInfo
+from sandbox.execute import ContainerInfo
 from sandbox.execute import DockerVolume
 from sandbox.execute import VolumeMountInfo
+from sandbox.execute import TaskInfo, WatchDogResult
 import logging
 from datetime import timedelta
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import time
 import docker
+from dotenv import load_dotenv
+import os
 
 from db.crud import *
 from db.database import SessionLocal
@@ -20,18 +22,33 @@ from db.database import SessionLocal
 logging.basicConfig(level=logging.INFO)
 test_logger = logging.getLogger(__name__)
 
+load_dotenv()
+GUEST_UID = os.getenv("GUEST_UID")
+GUEST_GID = os.getenv("GUEST_GID")
 
 # Dockerコンテナを起動して、Hello, World!を出力するテスト
 def test_RunHelloWorld():
-    task = TaskInfo(
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
         imageName="binary-runner",
-        arguments=["echo", "Hello, World!"],
-        timeoutSec=5.0,
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
         memoryLimitMB=256,
-        cpuset=[0]
     )
+    
+    err = container.start()
+    assert err.message == ""
 
-    result, err = task.run(client=docker.from_env())
+    result, err = container.exec_run(
+        command=["echo", "Hello, World!"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
 
     test_logger.info(result)
     test_logger.info(err)
@@ -43,19 +60,33 @@ def test_RunHelloWorld():
     assert result.stdout == "Hello, World!\n"
 
     assert result.stderr == ""
+    
+    err = container.remove()
+    assert err.message == ""
 
 
 # sandboxの戻り値をきちんとチェックできているか確かめるテスト
 def test_ExitCode():
-    task = TaskInfo(
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
         imageName="binary-runner",
-        arguments=["sh", "-c", "exit 123"],
-        timeoutSec=5.0,
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
         memoryLimitMB=256,
-        cpuset=[0]
     )
-
-    result, err = task.run(client=docker.from_env())
+    err = container.start()
+    assert err.message == ""
+    
+    result, err = container.exec_run(
+        command=["sh", "-c", "exit 123"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
 
     test_logger.info(result)
     test_logger.info(err)
@@ -64,32 +95,33 @@ def test_ExitCode():
     assert result.exitCode == 123
     assert result.stdout == ""
     assert result.stderr == ""
-
-
-# 標準入力をきちんと受け取れているか確かめるテスト
-def test_Stdin():
-    task = TaskInfo(
-        imageName="binary-runner",
-        arguments=["sh", "-c", 'read input; [ "$input" = "dummy" ]'],
-        Stdin="dummy",
-    )
-
-    result, err = task.run(client=docker.from_env())
-
-    test_logger.info(result)
-    test_logger.info(err)
-
+    
+    err = container.remove()
     assert err.message == ""
-    assert result.exitCode == 0
-    assert result.stdout == ""
-    assert result.stderr == ""
 
 
 # 標準出力をきちんとキャプチャできているか確かめるテスト
 def test_Stdout():
-    task = TaskInfo(imageName="binary-runner", arguments=["echo", "dummy"])
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=256,
+    )
+    err = container.start()
+    assert err.message == ""
 
-    result, err = task.run(client=docker.from_env())
+    result, err = container.exec_run(
+        command=["echo", "dummy"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
 
     test_logger.info(result)
     test_logger.info(err)
@@ -98,13 +130,33 @@ def test_Stdout():
     assert result.exitCode == 0
     assert result.stdout == "dummy\n"
     assert result.stderr == ""
+    
+    err = container.remove()
+    assert err.message == ""
 
 
 # 標準エラー出力をちゃんとキャプチャできているか確かめるテスト
 def test_Stderr():
-    task = TaskInfo(imageName="binary-runner", arguments=["sh", "-c", "echo dummy >&2"])
-
-    result, err = task.run(client=docker.from_env())
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=256,
+    )
+    err = container.start()
+    assert err.message == ""
+    
+    result, err = container.exec_run(
+        command=["sh", "-c", "echo dummy >&2"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
 
     test_logger.info(result)
     test_logger.info(err)
@@ -113,13 +165,33 @@ def test_Stderr():
     assert result.exitCode == 0
     assert result.stdout == ""
     assert result.stderr == "dummy\n"
+    
+    err = container.remove()
+    assert err.message == ""
 
 
 # sleepした分ちゃんと実行時間が計測されているか確かめるテスト
 def test_SleepTime():
-    task = TaskInfo(imageName="binary-runner", arguments=["sleep", "3"], timeoutSec=5.0)
-
-    result, err = task.run(client=docker.from_env())
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=256,
+    )
+    err = container.start()
+    assert err.message == ""
+    
+    result, err = container.exec_run(
+        command=["sleep", "3"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
 
     test_logger.info(result)
     test_logger.info(err)
@@ -129,352 +201,351 @@ def test_SleepTime():
     assert result.stdout == ""
     assert result.stderr == ""
     assert result.timeMS >= 2000 and result.timeMS <= 5000
+    
+    err = container.remove()
+    assert err.message == ""
 
+
+# コンテナにファイルがコピーできているか確かめるテスト
+def test_FileCopy():
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=256,
+    )
+    err = container.start()
+    assert err.message == ""
+    
+    with TemporaryDirectory() as tmpdir:
+        with open(Path(tmpdir) / "dummy.txt", "w") as f:
+            f.write("dummy\n")
+        
+        err = container.copyFile(srcInHost=Path(tmpdir) / "dummy.txt", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
+    
+    res, err = container.exec_run(
+        command=["cat", "/home/guest/dummy.txt"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=5.0
+    )
+    assert err.message == ""
+    assert res.exitCode == 0
+    assert res.stdout == "dummy\n"
+    assert res.stderr == ""
+    
+    err = container.remove()
+    assert err.message == ""
 
 # タイムアウトをきちんと検出できているか確かめるテスト
 def test_Timeout():
-    task = TaskInfo(imageName="binary-runner", arguments=["sleep", "100"], timeoutSec=3.0)
-
-    result, err = task.run(client=docker.from_env())
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=256,
+    )
+    err = container.start()
+    assert err.message == ""
+    
+    result, err = container.exec_run(
+        command=["sleep", "100"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=3.0
+    )
 
     test_logger.info(result)
     test_logger.info(err)
 
+    assert err.message != ""
+    assert result.timeMS >= 2000 and result.timeMS <= 5000
+    
+    # コンテナがkillされたので、コンテナを再起動
+    err = container.start()
     assert err.message == ""
-    assert result.TLE == True
-
-
-# ファイルをDockerボリュームにコピーするテスト
-def test_CopyFileFromClientToVolume():
-    # ファイル転送先のボリュームの作成
-    client = docker.from_env()
-    volume, err = DockerVolume.create(client=client)
-
-    assert err.message == ""
-
-    # tempdir にファイルを作成
-    with TemporaryDirectory() as tempdir:
-        with open(Path(tempdir) / "test.txt", "w") as f:
-            f.write("Hello, World!")
-
-        # ファイルをボリュームにコピー
-        err = volume.copyFile(client=client, srcPathOnClient=Path(tempdir) / "test.txt", dstDirOnVolume=Path("./"))
-        assert err.message == ""
-
-    # ファイルがコピーされたことを確認
-    task = TaskInfo(
-        imageName="binary-runner",
-        arguments=["cat", "test.txt"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
+    
+    # WatchDogを用いて、タイムアウトを検出できるか確かめる
+    task_info = TaskInfo(
+        command="sleep 100",
+        stdin="",
+        timeoutMS=3000,
+        memoryLimitMB=256,
+        uid=int(GUEST_UID),
+        gid=int(GUEST_GID),
     )
 
-    result, err = task.run(client=client)
+    with TemporaryDirectory() as tmpdir:
+        with open(Path(tmpdir) / "task.json", "w") as f:
+            f.write(task_info.model_dump_json())
 
-    test_logger.info(result)
-
-    assert err.message == ""
-
-    assert result.exitCode == 0
-
-    assert result.stdout == "Hello, World!"
-
-    assert result.stderr == ""
-
-    err = volume.remove()
-
-    assert err.message == ""
-
-
-# 複数のファイルをDockerボリュームにコピーするテスト
-def test_CopyFilesFromClientToVolume():
-    # ファイル転送先のボリュームの作成
-    client = docker.from_env()
-    volume, err = DockerVolume.create(client=client)
-
-    assert err.message == ""
-
-    # tempdir にファイルを作成
-    with TemporaryDirectory() as tempdir:
-        with open(Path(tempdir) / "test1.txt", "w") as f:
-            f.write("Hello, World!")
-
-        with open(Path(tempdir) / "test2.txt", "w") as f:
-            f.write("Goodbye, World!")
-
-        # ファイルをボリュームにコピー
-        err = volume.copyFiles(
-            client=client,
-            srcPathsOnClient=[
-                Path(tempdir) / "test1.txt",
-                Path(tempdir) / "test2.txt",
-            ],
-            dstDirOnVolume=Path("./"),
+        err = container.copyFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["chown", "root:root", "/home/guest/task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=2.0
         )
         assert err.message == ""
-    # ファイルがコピーされたことを確認
-    task = TaskInfo(
-        imageName="binary-runner",
-        arguments=["cat", "test1.txt", "test2.txt"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
-    )
-
-    result, err = task.run(client=client)
-
-    test_logger.info(result)
-
-    assert err.message == ""
-
-    assert result.exitCode == 0
-
-    assert result.stdout == "Hello, World!Goodbye, World!"
-
-    assert result.stderr == ""
-
-    err = volume.remove()
-
-    assert err.message == ""
-
-
-# Dockerボリュームにある複数のファイルを削除するテスト
-def test_RemoveFilesInVolume():
-    # ファイル転送先のボリュームの作成
-    client = docker.from_env()
-    volume, err = DockerVolume.create(client=client)
-
-    assert err.message == ""
-
-    # tempdir にファイルを作成
-    with TemporaryDirectory() as tempdir:
-        with open(Path(tempdir) / "test1.txt", "w") as f:
-            f.write("Hello, World!")
-
-        with open(Path(tempdir) / "test2.txt", "w") as f:
-            f.write("Goodbye, World!")
-
-        # ファイルをボリュームにコピー
-        err = volume.copyFiles(
-            client=client,
-            srcPathsOnClient=[
-                Path(tempdir) / "test1.txt",
-                Path(tempdir) / "test2.txt",
-            ],
-            dstDirOnVolume=Path("./"),
+        
+        res, err = container.exec_run(
+            command=["chmod", "600", "/home/guest/task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=2.0
         )
         assert err.message == ""
 
-    # ファイルがコピーされたことを確認
-    task = TaskInfo(
-        imageName="binary-runner",
-        arguments=["ls"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
-    )
-
-    result, err = task.run(client=client)
-
-    test_logger.info(result)
-
-    assert err.message == ""
-
-    assert result.exitCode == 0
-
-    assert result.stdout == "test1.txt\ntest2.txt\n"
-
-    assert result.stderr == ""
-
-    # ファイルを削除
-    err = volume.removeFiles(client=client, filePathsInVolume=[Path("test1.txt"), Path("test2.txt")])
-    assert err.message == ""
-
-    # ファイルが削除されたことを確認
-    task = TaskInfo(
-        imageName="binary-runner",
-        arguments=["ls"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
-    )
-
-    result, err = task.run(client=client)
-
-    test_logger.info(result)
-
-    assert err.message == ""
-
-    assert result.exitCode == 0
-
-    assert result.stdout == ""
-
-    assert result.stderr == ""
-
-    err = volume.remove()
-
-    test_logger.info(err)
-
-    assert err.message == ""
-
-
-# ボリュームのクローンができているかチェック
-def test_CloneVolume():
-    # 一時ディレクトリを作成
-    with TemporaryDirectory() as temp_dir:
-        # テストファイルを作成
-        file1_path = Path(temp_dir) / "file1.txt"
-        file2_path = Path(temp_dir) / "file2.txt"
-        with open(file1_path, "w") as f1, open(file2_path, "w") as f2:
-            f1.write("Content of file1")
-            f2.write("Content of file2")
-
-        # 元のボリュームを作成
-        client = docker.from_env()
-        original_volume, err = DockerVolume.create(client=client)
-        assert err.message == ""
-
-        # テストファイルを元のボリュームにコピー
-        err = original_volume.copyFile(client=client, srcPathOnClient=Path(file1_path))
-        assert err.message == ""
-        err = original_volume.copyFile(client=client, srcPathOnClient=Path(file2_path))
-        assert err.message == ""
-
-        # ボリュームをクローン
-        cloned_volume, err = original_volume.clone(client=client)
-        assert err.message == ""
-
-        # クローンされたボリュームの内容を確認
-        task = TaskInfo(
-            imageName="binary-runner",
-            arguments=["ls"],
-            workDir="/home/guest/",
-            volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=cloned_volume)],
+        res, err = container.exec_run(
+            command=["./watchdog", "task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=8.0
         )
+        assert err.message == ""
+        
+        test_logger.info(res)
+        
+        watchdog_result = WatchDogResult.model_validate_json(res.stdout)
+        assert watchdog_result.TLE == True
 
-        result, err = task.run(client=client)
-        assert err.message == ""
-        assert result.exitCode == 0
-        assert "file1.txt" in result.stdout
-        assert "file2.txt" in result.stdout
-
-        # クリーンアップ
-        err = original_volume.remove()
-        assert err.message == ""
-        err = cloned_volume.remove()
-        assert err.message == ""
+    err = container.remove()
+    assert err.message == ""
 
 # メモリ制限を検出できるかチェック
 def test_MemoryLimit():
-    task = TaskInfo(
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
         imageName="binary-runner",
-        arguments=["dd", "if=/dev/zero", "of=/dev/null", "bs=800M"],
-        timeoutSec=3.0,
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
         memoryLimitMB=500,
     )
-
-    result, err = task.run(client=docker.from_env())
-
+    err = container.start()
     assert err.message == ""
 
-    test_logger.info(result)
+    result, err = container.exec_run(
+        command=["dd", "if=/dev/zero", "of=/dev/null", "bs=800M"],
+        user="root",
+        workDir="/home/guest",
+        timeoutSec=3.0,
+    )
 
+    test_logger.info(result)
+    test_logger.info(err)
+    
     assert result.exitCode != 0
-    # assert result.TLE == False
-    assert abs(result.memoryByte - 500 * 1024 * 1024) < 1024 * 1024
+    
+    # コンテナを再起動
+    err = container.start()
+    assert err.message == ""
+    
+    # WatchDogを用いて、メモリ制限を検出できるか確かめる
+    task_info = TaskInfo(
+        command="dd if=/dev/zero of=/dev/null bs=800M",
+        stdin="",
+        timeoutMS=3000,
+        memoryLimitMB=300,
+        uid=int(GUEST_UID),
+        gid=int(GUEST_GID),
+    )
+    
+    with TemporaryDirectory() as tmpdir:
+        with open(Path(tmpdir) / "task.json", "w") as f:
+            f.write(task_info.model_dump_json())
+        
+        err = container.copyFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["chown", "root:root", "/home/guest/task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=2.0
+        )
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["chmod", "600", "/home/guest/task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=2.0
+        )
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["./watchdog", "task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=8.0
+        )
+        assert err.message == ""
+        
+        test_logger.info(res)
+        
+        watchdog_result = WatchDogResult.model_validate_json(res.stdout)
+        assert watchdog_result.MLE == True
+    
+    err = container.remove()
+    assert err.message == ""
 
 
 # ネットワーク制限をできているかチェック
 def test_NetworkDisable():
-    task = TaskInfo(
+    client = docker.client.from_env()
+    
+    container = ContainerInfo(
+        client=client,
         imageName="ibmcom/ping",
-        arguments=["ping", "-c", "5", "google.com"],
+        arguments=["sleep", "3600"],
         enableNetwork=None,
     )
+    
+    err = container.start()
+    assert err.message == ""
+    
+    res, err = container.exec_run(
+        command=["ping", "-c", "5", "google.com"],
+        user="root",
+        workDir="/home/guest",
+        timeoutSec=10.0
+    )
 
-    result, err = task.run(client=docker.from_env())
+    test_logger.info(res)
+    test_logger.info(err)
 
     assert err.message == ""
 
-    test_logger.info(result)
-
-    assert result.exitCode != 0
-    assert result.TLE == False
-    assert result.stdout == ""
+    assert res.exitCode != 0
+    assert res.stdout == ""
+    
+    err = container.remove()
+    assert err.message == ""
 
 
 # フォークボムなどの攻撃に対処できるように、プロセス数制限ができているかチェック
 def test_ForkBomb():
     client = docker.from_env()
-    volume, err = DockerVolume.create(client=client)
-
-    assert err.message == ""
-
-    err = volume.copyFile(client=client, srcPathOnClient=Path("sources/fork_bomb.sh"))
-
-    assert err.message == ""
-
-    task = TaskInfo(
+    container = ContainerInfo(
+        client=client,
         imageName="binary-runner",
-        arguments=["./fork_bomb.sh"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
-        timeoutSec=3.0,
-        pidsLimit=10,
+        arguments=["sleep", "3600"],
+        pidsLimit=20,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+    )
+    
+    err = container.start()
+    assert err.message == ""
+
+    err = container.copyFile(srcInHost=Path("sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
+
+    assert err.message == ""
+
+    res, err = container.exec_run(
+        command=["./fork_bomb.sh"],
+        user=GUEST_UID,
+        workDir="/home/guest",
+        timeoutSec=10.0
     )
 
-    result, err = task.run(client=client)
-
-    test_logger.info(result)
+    test_logger.info(res)
     test_logger.info(err)
 
-    err = volume.remove()
-
+    assert err.message != ""
+    assert res.exitCode != 0
+    
+    err = container.remove()
     assert err.message == ""
 
 
 # スタックメモリの制限ができているかチェック
 def test_UseManyStack():
     client = docker.from_env()
-    volume, err = DockerVolume.create(client=client)
-
-    assert err.message == ""
-
-    err = volume.copyFile(client=client, srcPathOnClient=Path("sources/use_many_stack.c"))
-
-    assert err.message == ""
-
-    task = TaskInfo(
+    container = ContainerInfo(
+        client=client,
         imageName="checker-lang-gcc",
-        arguments=["gcc", "use_many_stack.c"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
-    )
-
-    result, err = task.run(client=client)
-
-    test_logger.info(result)
-    test_logger.info(err)
-
-    assert err.message == ""
-    assert result.exitCode == 0
-
-    task = TaskInfo(
-        imageName="binary-runner",
-        arguments=["./a.out"],
-        workDir="/home/guest/",
-        volumeMountInfoList=[VolumeMountInfo(path="/home/guest/", volume=volume)],
-        stackLimitKB=10240,
+        arguments=["sleep", "3600"],
+        workDir="/home/guest",
         memoryLimitMB=256,
     )
-
-    result, err = task.run(client=client)
-
-    test_logger.info(result)
-    test_logger.info(err)
-
-    assert result.exitCode != 0
-
-    err = volume.remove()
-
+    
+    err = container.start()
     assert err.message == ""
+
+    err = container.copyFile(srcInHost=Path("sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
+    assert err.message == ""
+    
+    res, err = container.exec_run(
+        command=["gcc", "use_many_stack.c"],
+        user=f"{GUEST_UID}:{GUEST_GID}",
+        workDir="/home/guest",
+        timeoutSec=10.0,
+    )
+
+    test_logger.info(res)
+    test_logger.info(err)
+    assert err.message == ""
+    assert res.exitCode == 0
+    
+    with TemporaryDirectory() as tmpdir:
+        err = container.downloadFile(absPathInContainer=Path("/home/guest/a.out"), dstInHost=Path(tmpdir))
+        assert err.message == ""
+    
+        # コンパイル用コンテナを削除
+        err = container.remove()
+        assert err.message == ""
+    
+        # 実行用コンテナを起動
+        container = ContainerInfo(
+            client=client,
+            imageName="binary-runner",
+            arguments=["sleep", "3600"],
+            workDir="/home/guest",
+            memoryLimitMB=256,
+            stackLimitKB=10240,
+        )
+    
+        err = container.start()
+        assert err.message == ""
+        
+        # ./a.outをアップロード
+        err = container.copyFile(srcInHost=Path(tmpdir) / "a.out", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
+
+        res, err = container.exec_run(
+            command=["./a.out"],
+            user=f"{GUEST_UID}:{GUEST_GID}",
+            workDir="/home/guest",
+            timeoutSec=10.0,
+        )
+
+        test_logger.info(res)
+        test_logger.info(err)
+
+        assert err.message == ""
+        assert res.exitCode != 0
+
+        err = container.remove()
+        assert err.message == ""
 
 
 # 試しにジャッジリクエストを投じてみて、どのような結果になるか見てみる。

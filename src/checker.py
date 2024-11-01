@@ -21,7 +21,7 @@ class StandardChecker:
         ls_lines = [line for line in ls_lines if line != '']
         rs_lines = [line for line in rs_lines if line != '']
                 
-        # print(f"ls: {ls_lines}, rs: {rs_lines}")
+        # logger.info(f"ls: {ls_lines}, rs: {rs_lines}")
 
         # 行数が異なる場合はFalse
         if len(ls_lines) != len(rs_lines):
@@ -45,7 +45,7 @@ class StandardChecker:
         ls_lines = [line.split() for line in ls_lines]
         rs_lines = [line.split() for line in rs_lines]
         
-        print(f"ls_lines: {ls_lines}, rs_lines: {rs_lines}")
+        # logger.info(f"ls_lines: {ls_lines}, rs_lines: {rs_lines}")
         
         # 各行を比較
         for ls_line, rs_line in zip(ls_lines, rs_lines):
