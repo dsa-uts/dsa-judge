@@ -1,8 +1,10 @@
 FROM ubuntu:24.10
 
 # 出力をソート・整形するためのperlライブラリのインストール
+# メモリリーク検出のためのvalgrindのインストール
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libperl5.38 \
+    valgrind \
     && rm -rf /var/lib/apt/lists/*
 
 # watchdogをコピー
