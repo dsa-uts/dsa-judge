@@ -519,6 +519,7 @@ class JudgeInfo:
             
         if self.submission_record.result != records.SubmissionSummaryStatus.AC:
             self.submission_record.message += "ビルドに失敗しました\n"
+            self.submission_record.judge_results = judge_result_list
             return self._closing_procedure(
                 submission_record=self.submission_record,
                 container=build_container_info,
@@ -540,6 +541,7 @@ class JudgeInfo:
             self.submission_record.result = records.SubmissionSummaryStatus.IE
             self.submission_record.message += "error when executing sandbox: ls -lp\n"
             self.submission_record.detail += f"{err.message}\n"
+            self.submission_record.judge_results = judge_result_list
             return self._closing_procedure(
                 submission_record=self.submission_record,
                 working_volume=working_volume
@@ -593,6 +595,10 @@ class JudgeInfo:
         err = sandbox_container_info.start()
         if not err.silence():
             judge_logger.error(f"failed to start sandbox container: {sandbox_container_info._container.id}")
+            self.submission_record.result = records.SubmissionSummaryStatus.IE
+            self.submission_record.message += "error when starting sandbox container\n"
+            self.submission_record.detail += f"{err.message}\n"
+            self.submission_record.judge_results = judge_result_list
             return self._closing_procedure(
                 submission_record=self.submission_record,
                 container=None,
