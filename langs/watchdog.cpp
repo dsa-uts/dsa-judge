@@ -116,14 +116,6 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  std::vector<std::string> args;
-  // commandを空白で分割
-  std::string token;
-  std::istringstream token_stream(command);
-  while (token_stream >> token) {
-    args.push_back(token);
-  }
-
   int exit_code = -1;
   std::string stdout_str;
   std::string stderr_str;
@@ -199,15 +191,8 @@ int main(int argc, char** argv) {
       dup2(stdin_pipe[0], STDIN_FILENO);
       close(stdin_pipe[0]);
 
-      char** argv = new char*[args.size() + 1];
-      for (size_t i = 0; i < args.size(); i++) {
-        argv[i] = const_cast<char*>(args[i].c_str());
-      }
-      argv[args.size()] = NULL;
-
-      // コマンドを実行
-      execvp(argv[0], argv);
-      std::perror("execvp failed");
+      execl("/bin/sh", "sh", "-c", command.c_str(), NULL);
+      std::perror("execl failed");
       exit(1);
     }
   } else {
