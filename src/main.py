@@ -40,7 +40,7 @@ class WorkerPool:
             return True
         return False
     
-worker_pool = WorkerPool(max_workers=2)
+worker_pool = WorkerPool(max_workers=4)
 
 def process_one_judge_request(submission: records.Submission) -> Error:
     judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, eval={submission.eval}) will be created...")
