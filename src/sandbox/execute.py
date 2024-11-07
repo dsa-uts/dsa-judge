@@ -155,7 +155,12 @@ class ContainerInfo:
         return Error("")
 
     # ファイルのコピー
-    def copyFile(self, srcInHost: Path, dstInContainer: Path) -> Error:
+    def uploadFile(self, srcInHost: Path, dstInContainer: Path) -> Error:
+        '''
+        srcInHost=".../sample.txt"
+        dstInContainer="/home/guest/"
+        の場合、コンテナ内に"/home/guest/sample.txt"としてコピーされる
+        '''
         try:
             with tempfile.TemporaryFile(suffix=".tar") as tmp:
                 tar = tarfile.open(fileobj=tmp, mode="w")
@@ -172,6 +177,33 @@ class ContainerInfo:
 
         SANDBOX_LOGGER.debug(f"copy file: {srcInHost} -> {dstInContainer}")
 
+        return Error("")
+    
+    # フォルダツリーごとコンテナにアップロード
+    def uploadTree(self, srcRootInHost: Path, dstRootInContainer: Path) -> Error:
+        '''
+        srcRootInHost=".../dir"
+        (".../dir/file1.txt", ".../dir/file2.txt", ".../dir/subdir/file3.txt")
+        dstRootInContainer="/home/guest"
+        の場合、コンテナ内に"/home/guest/file1.txt", "/home/guest/file2.txt", "/home/guest/subdir/file3.txt"としてコピーされる
+        '''
+        try:
+            with tempfile.TemporaryFile(suffix=".tar") as tmp:
+                tar = tarfile.open(fileobj=tmp, mode="w")
+                for file_path in srcRootInHost.glob("**/*"):
+                    if file_path.is_file():
+                        arcname = file_path.relative_to(srcRootInHost)
+                        tar.add(file_path, arcname=arcname)
+                tar.close()
+                
+                tmp.seek(0)
+                if not self._container.put_archive(path=str(dstRootInContainer), data=tmp.read()):
+                    return Error("Failed to put archive")
+        except APIError as e:
+            return Error(f"Failed to copy file: {e}")
+        except Exception as e:
+            return Error(f"Failed to copy file: {e}")
+        
         return Error("")
     
     def downloadFile(self, absPathInContainer: Path, dstInHost: Path) -> Error:

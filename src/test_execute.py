@@ -226,7 +226,7 @@ def test_FileCopy():
         with open(Path(tmpdir) / "dummy.txt", "w") as f:
             f.write("dummy\n")
         
-        err = container.copyFile(srcInHost=Path(tmpdir) / "dummy.txt", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "dummy.txt", dstInContainer=Path("/home/guest"))
         assert err.message == ""
     
     res, err = container.exec_run(
@@ -290,7 +290,7 @@ def test_Timeout():
         with open(Path(tmpdir) / "task.json", "w") as f:
             f.write(task_info.model_dump_json())
 
-        err = container.copyFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
         assert err.message == ""
         
         res, err = container.exec_run(
@@ -371,7 +371,7 @@ def test_MemoryLimit():
         with open(Path(tmpdir) / "task.json", "w") as f:
             f.write(task_info.model_dump_json())
         
-        err = container.copyFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
         assert err.message == ""
         
         res, err = container.exec_run(
@@ -456,7 +456,7 @@ def test_ForkBomb():
     err = container.start()
     assert err.message == ""
 
-    err = container.copyFile(srcInHost=Path("sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
+    err = container.uploadFile(srcInHost=Path("sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
 
     assert err.message == ""
 
@@ -491,7 +491,7 @@ def test_UseManyStack():
     err = container.start()
     assert err.message == ""
 
-    err = container.copyFile(srcInHost=Path("sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
+    err = container.uploadFile(srcInHost=Path("sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
     assert err.message == ""
     
     res, err = container.exec_run(
@@ -528,7 +528,7 @@ def test_UseManyStack():
         assert err.message == ""
         
         # ./a.outをアップロード
-        err = container.copyFile(srcInHost=Path(tmpdir) / "a.out", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "a.out", dstInContainer=Path("/home/guest"))
         assert err.message == ""
 
         res, err = container.exec_run(
@@ -563,23 +563,7 @@ def test_submit_judge():
             lecture_id=1,
             assignment_id=1,
             eval=False,
-        )
-
-        # 提出されたファイルを登録
-        register_uploaded_files(
-            db=db,
-            submission_id=submission.id,
-            path=Path("sample_submission/ex1-1/gcd_euclid.c"),
-        )
-        register_uploaded_files(
-            db=db,
-            submission_id=submission.id,
-            path=Path("sample_submission/ex1-1/main_euclid.c"),
-        )
-        register_uploaded_files(
-            db=db,
-            submission_id=submission.id,
-            path=Path("sample_submission/ex1-1/Makefile"),
+            upload_dir="sample_submission/ex1-1",
         )
 
         # ジャッジリクエストをキューに並べる
