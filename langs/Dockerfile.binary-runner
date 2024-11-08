@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ゲストユーザー(1002:1002)を作成
 RUN groupadd -g 1002 guest && \
-    useradd -m -s /bin/bash -u 1002 -g 1002 guestt
+    useradd -m -s /bin/bash -u 1002 -g 1002 guest
 
 # watchdogをコピー
 # uid:gid=root:rootで、ファイルのパーミッションは700にする
