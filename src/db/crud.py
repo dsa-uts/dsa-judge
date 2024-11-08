@@ -33,7 +33,7 @@ def fetch_queued_judge_and_change_status_to_running(
         submission_list = (
             db.query(models.Submission)
             .filter(models.Submission.progress == "queued")
-            .with_for_update(nowait=True)
+            .with_for_update(nowait=False)
             .limit(n)
             .all()
         )
