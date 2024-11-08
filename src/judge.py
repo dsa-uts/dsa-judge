@@ -106,7 +106,7 @@ class JudgeInfo:
                     f.write(task_info_json)
                 
                 # コンテナ内にコピー
-                err = container.copyFile(srcInHost=Path(temp_dir) / "task.json", dstInContainer=Path("/home/guest"))
+                err = container.uploadFile(srcInHost=Path(temp_dir) / "task.json", dstInContainer=Path("/home/guest"))
                 if not err.silence():
                     raise ValueError(f"Failed to copy task.json to container: {err.message}")
                     continue
@@ -133,7 +133,7 @@ class JudgeInfo:
 
             # watchdogによる実行
             result, err = container.exec_run(
-                command=["./watchdog", "task.json"],
+                command=["/home/watchdog", "task.json"],
                 user="root",
                 workDir="/home/guest",
                 timeoutSec=8
@@ -265,7 +265,7 @@ class JudgeInfo:
                     f.write(task_info_json)
                 
                 # コンテナ内にコピー
-                err = container.copyFile(srcInHost=Path(temp_dir) / "task.json", dstInContainer=Path("/home/guest"))
+                err = container.uploadFile(srcInHost=Path(temp_dir) / "task.json", dstInContainer=Path("/home/guest"))
                 if not err.silence():
                     raise ValueError(f"Failed to copy task.json to container: {err.message}")
                     continue
@@ -292,7 +292,7 @@ class JudgeInfo:
 
             # watchdogによる実行
             result, err = container.exec_run(
-                command=["./watchdog", "task.json"],
+                command=["/home/watchdog", "task.json"],
                 user="root",
                 workDir="/home/guest",
                 timeoutSec=8
@@ -419,27 +419,7 @@ class JudgeInfo:
         self.submission_record.timeMS = 0
         self.submission_record.memoryKB = 0
 
-        # 1. ビルド前チェックを行う
-        # アップロードされたファイルの中に、要求されているファイルが含まれているかチェックする。
-        # 注)このとき、他のファイルが含まれていても良しとする(現状の判断では)
-        uploaded_filename = [Path(file_path.path).name for file_path in self.submission_record.uploaded_files]
-        required_filename = [required_file.name for required_file in self.problem_record.required_files]
-
-        # self.problem_record.required_filesの内容がuploaded_filenameに完全に含まれているか調べる
-        missing_files = set(required_filename) - set(uploaded_filename)
-        if missing_files:
-            # ファイルが見つからなかったことをDBに登録して、早期終了
-            self.submission_record.result = records.SubmissionSummaryStatus.FN
-            self.submission_record.message = "ファイルが存在しません"
-            self.submission_record.detail = f"{' '.join(missing_files)}"
-            self.submission_record.score = 0
-            return self._closing_procedure(
-                submission_record=self.submission_record,
-                container=None,
-                working_volume=None
-            )
-
-        # 2. 準備
+        # 1. 準備
         # ボリューム作成
         working_volume, err = DockerVolume.create(client=self.client)
         if not err.silence():
@@ -480,12 +460,23 @@ class JudgeInfo:
                 working_volume=working_volume
             )
         
-        # コンテナにファイルをコピーする
-        uploaded_filepaths = [UPLOAD_DIR / file.path for file in self.submission_record.uploaded_files]
-        arranged_filepaths = [RESOURCE_DIR / file.path for file in self.problem_record.arranged_files]
+        # コンテナにジャッジリクエストでアップロードされたファイルをコピーする
+        abs_upload_dir = Path(UPLOAD_DIR) / str(self.submission_record.upload_dir)
+        err = build_container_info.uploadTree(srcRootInHost=abs_upload_dir, dstRootInContainer="/home/guest/", uid=int(GUEST_UID), gid=int(GUEST_GID))
+        if not err.silence():
+            self.submission_record.result = records.SubmissionSummaryStatus.IE
+            self.submission_record.message = "error when copying files to build container"
+            self.submission_record.detail = err.message
+            return self._closing_procedure(
+                submission_record=self.submission_record,
+                container=build_container_info,
+                working_volume=working_volume
+            )
         
-        for filepath in uploaded_filepaths + arranged_filepaths:
-            err = build_container_info.copyFile(srcInHost=filepath, dstInContainer="/home/guest/")
+        abs_arranged_filepaths = [RESOURCE_DIR / file.path for file in self.problem_record.arranged_files]
+        
+        for filepath in abs_arranged_filepaths:
+            err = build_container_info.uploadFile(srcInHost=filepath, dstInContainer="/home/guest/", uid=int(GUEST_UID), gid=int(GUEST_GID))
             if not err.silence():
                 self.submission_record.result = records.SubmissionSummaryStatus.IE
                 self.submission_record.message = "error when copying files to build container"
@@ -498,7 +489,7 @@ class JudgeInfo:
 
         judge_result_list = []
 
-        # 3. Builtテストケース(コンパイル)を実行する
+        # 2. Builtテストケース(コンパイル)を実行する
         built_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Built]
         build_exec_result_list = self._exec_built_task(
             container=build_container_info,
@@ -525,45 +516,6 @@ class JudgeInfo:
                 container=build_container_info,
                 working_volume=working_volume
             )
-
-        # 4. 必要な実行ファイルが生成されているか調べる
-        executable_list = [executable.name for executable in self.problem_record.executables]
-
-        # Volume内でどのようなファイルが生成されたか調べる
-        result, err = build_container_info.exec_run(
-            command=["ls", "-p"],
-            user="root",
-            workDir="/home/guest",
-            timeoutSec=2
-        )
-
-        if not err.silence():
-            self.submission_record.result = records.SubmissionSummaryStatus.IE
-            self.submission_record.message += "error when executing sandbox: ls -lp\n"
-            self.submission_record.detail += f"{err.message}\n"
-            self.submission_record.judge_results = judge_result_list
-            return self._closing_procedure(
-                submission_record=self.submission_record,
-                working_volume=working_volume
-            )
-
-        all_files_in_sandbox = [file for file in result.stdout.strip().split()]
-
-        # all_files_in_sandboxの中に、executable_listの要素が全部含まれているか調べる。
-        # 含まれていないものがあれば、それをnot_found_listで表す。
-        not_found_executable_set = set(executable_list) - set(all_files_in_sandbox)
-        if not_found_executable_set:
-            # 必要な実行バイナリが見つからなかったことをDBに登録して、早期終了
-            self.submission_record.result = records.SubmissionSummaryStatus.CE
-            self.submission_record.message += "実行ファイルが出力されていません\n"
-            self.submission_record.detail += f"{' '.join(not_found_executable_set)}\n"
-            self.submission_record.judge_results = judge_result_list
-            # submission_summary_record.score = (total sum)
-            return self._closing_procedure(
-                submission_record=self.submission_record,
-                container=build_container_info,
-                working_volume=working_volume
-            )
         
         # ビルドコンテナを削除
         err = build_container_info.remove()
@@ -583,7 +535,9 @@ class JudgeInfo:
             interactive=False,
             user="root",
             groups=["root"],
-            memoryLimitMB=1024,
+            # メモリーリミットに512MBの余裕を持たせて、watchdogがメモリーリミット超過を検知し、
+            # ユーザープログラムをkillできるようにする。
+            memoryLimitMB=self.problem_record.memoryMB + 512,
             pidsLimit=100,
             workDir="/home/guest",
             volumeMountInfoList=[

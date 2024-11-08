@@ -226,7 +226,7 @@ def test_FileCopy():
         with open(Path(tmpdir) / "dummy.txt", "w") as f:
             f.write("dummy\n")
         
-        err = container.copyFile(srcInHost=Path(tmpdir) / "dummy.txt", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "dummy.txt", dstInContainer=Path("/home/guest"))
         assert err.message == ""
     
     res, err = container.exec_run(
@@ -290,7 +290,7 @@ def test_Timeout():
         with open(Path(tmpdir) / "task.json", "w") as f:
             f.write(task_info.model_dump_json())
 
-        err = container.copyFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
         assert err.message == ""
         
         res, err = container.exec_run(
@@ -310,7 +310,7 @@ def test_Timeout():
         assert err.message == ""
 
         res, err = container.exec_run(
-            command=["./watchdog", "task.json"],
+            command=["/home/watchdog", "task.json"],
             user="root",
             workDir="/home/guest",
             timeoutSec=8.0
@@ -351,11 +351,24 @@ def test_MemoryLimit():
     test_logger.info(result)
     test_logger.info(err)
     
-    assert result.exitCode != 0
+    container._container.reload()
+    test_logger.info(f"container status: {container._container.status}")
+    
+    # メモリ制限超過により、OOM Killerがコンテナをkillする。その際、内部のプロセスもkillされ、
+    # そのプロセスの終了コードが137となる
+    assert result.exitCode == 137
     
     # コンテナを再起動
-    err = container.start()
+    # startではなくrestartを使うのは、確実にstop -> startの順でコンテナを確実に停止->起動
+    # させるためである。
+    # startの場合、コンテナがまだ停止していない場合何も副作用を起こさず、その後OOM Killerにより
+    # 停止する、といいったことが起こり、その後のexec_runリクエストを停止したコンテナに送信して
+    # 失敗するといったことが起こる。
+    err = container.restart()
     assert err.message == ""
+    
+    container._container.reload()
+    test_logger.info(f"container status: {container._container.status}")
     
     # WatchDogを用いて、メモリ制限を検出できるか確かめる
     task_info = TaskInfo(
@@ -371,7 +384,7 @@ def test_MemoryLimit():
         with open(Path(tmpdir) / "task.json", "w") as f:
             f.write(task_info.model_dump_json())
         
-        err = container.copyFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
         assert err.message == ""
         
         res, err = container.exec_run(
@@ -391,7 +404,7 @@ def test_MemoryLimit():
         assert err.message == ""
         
         res, err = container.exec_run(
-            command=["./watchdog", "task.json"],
+            command=["/home/watchdog", "task.json"],
             user="root",
             workDir="/home/guest",
             timeoutSec=8.0
@@ -456,7 +469,7 @@ def test_ForkBomb():
     err = container.start()
     assert err.message == ""
 
-    err = container.copyFile(srcInHost=Path("sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
+    err = container.uploadFile(srcInHost=Path("sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
 
     assert err.message == ""
 
@@ -491,7 +504,7 @@ def test_UseManyStack():
     err = container.start()
     assert err.message == ""
 
-    err = container.copyFile(srcInHost=Path("sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
+    err = container.uploadFile(srcInHost=Path("sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
     assert err.message == ""
     
     res, err = container.exec_run(
@@ -528,7 +541,7 @@ def test_UseManyStack():
         assert err.message == ""
         
         # ./a.outをアップロード
-        err = container.copyFile(srcInHost=Path(tmpdir) / "a.out", dstInContainer=Path("/home/guest"))
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "a.out", dstInContainer=Path("/home/guest"))
         assert err.message == ""
 
         res, err = container.exec_run(
@@ -563,23 +576,7 @@ def test_submit_judge():
             lecture_id=1,
             assignment_id=1,
             eval=False,
-        )
-
-        # 提出されたファイルを登録
-        register_uploaded_files(
-            db=db,
-            submission_id=submission.id,
-            path=Path("sample_submission/ex1-1/gcd_euclid.c"),
-        )
-        register_uploaded_files(
-            db=db,
-            submission_id=submission.id,
-            path=Path("sample_submission/ex1-1/main_euclid.c"),
-        )
-        register_uploaded_files(
-            db=db,
-            submission_id=submission.id,
-            path=Path("sample_submission/ex1-1/Makefile"),
+            upload_dir="sample_submission/ex1-1",
         )
 
         # ジャッジリクエストをキューに並べる

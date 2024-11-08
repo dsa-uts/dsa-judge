@@ -1,5 +1,6 @@
 # Create, Read, Update and Delete (CRUD)
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from pathlib import Path
 from pprint import pp
 from sqlalchemy import inspect
@@ -32,7 +33,7 @@ def fetch_queued_judge_and_change_status_to_running(
         submission_list = (
             db.query(models.Submission)
             .filter(models.Submission.progress == "queued")
-            .with_for_update(nowait=True)
+            .with_for_update(nowait=False)
             .limit(n)
             .all()
         )
@@ -45,9 +46,12 @@ def fetch_queued_judge_and_change_status_to_running(
             submission_total_task = (
                 db.query(models.TestCases)
                 .filter(models.TestCases.lecture_id == submission.lecture_id, 
-                        models.TestCases.assignment_id == submission.assignment_id,
-                        # 非評価用の課題は必ず含めるものとする
-                        (models.TestCases.eval == submission.eval) | (models.TestCases.eval == False))
+                        models.TestCases.assignment_id == submission.assignment_id)
+                .filter(
+                    # 非評価用の課題は必ず含めるものとする
+                    or_(models.TestCases.eval == submission.eval,
+                        models.TestCases.eval == False)
+                )
                 .count()
             )
             # CRUD_LOGGER.debug(f"total_task: {submission_total_task}")
@@ -163,12 +167,6 @@ def undo_running_submissions(db: Session) -> None:
     # 変更をコミット
     db.commit()
 
-
-def fetch_uploaded_files(db: Session, submission_id: int) -> list[records.UploadedFiles]:
-    raw_uploaded_files = db.query(models.UploadedFiles).filter(models.UploadedFiles.submission_id == submission_id).all()
-    return [records.UploadedFiles.model_validate(uploaded_file) for uploaded_file in raw_uploaded_files]
-
-
 # ----------------------- end --------------------------------------------------
 
 # ---------------- for client server -------------------------------------------
@@ -182,6 +180,7 @@ def register_judge_request(
     lecture_id: int,
     assignment_id: int,
     eval: bool,
+    upload_dir: str
 ) -> records.Submission:
     # CRUD_LOGGER.debug("call register_judge_request")
     new_submission = models.Submission(
@@ -190,6 +189,7 @@ def register_judge_request(
         lecture_id=lecture_id,
         assignment_id=assignment_id,
         eval=eval,
+        upload_dir=upload_dir,
     )
     db.add(new_submission)
     db.commit()
@@ -197,13 +197,17 @@ def register_judge_request(
     return records.Submission.model_validate(new_submission)
 
 
-# アップロードされたファイルをUploadedFilesに登録する
-def register_uploaded_files(db: Session, submission_id: int, path: Path) -> None:
-    # CRUD_LOGGER.debug("call register_uploaded_files")
-    new_uploadedfiles = models.UploadedFiles(
-        submission_id=submission_id, path=str(path)
+# アップロードされたファイルがあるディレクトリのパスをSubmissionテーブルに登録する
+def register_upload_dir(db: Session, submission_id: int, upload_dir: str) -> None:
+    # CRUD_LOGGER.debug("call register_upload_dir")
+    submission = (
+        db.query(models.Submission)
+        .filter(models.Submission.id == submission_id)
+        .first()
     )
-    db.add(new_uploadedfiles)
+    if submission is None:
+        raise ValueError(f"Submission with id {submission_id} not found")
+    submission.upload_dir = upload_dir
     db.commit()
 
 

@@ -12,6 +12,74 @@ from judge import JudgeInfo
 
 from log.config import judge_logger
 from sandbox.execute import define_sandbox_logger
+from queue import Queue
+from threading import Lock, Thread
+import time
+import traceback
+
+class JobManager:
+    def __init__(self, max_workers=5, queue_size=40):
+        self.worker_pool = WorkerPool(max_workers=max_workers)
+        self.job_queue = Queue(maxsize=queue_size)
+        self._running = True
+        
+        # Job Queue補充用スレッド
+        self.queue_filler_thread = Thread(target=self._fill_job_queue)
+        self.queue_filler_thread.daemon = True
+        self.queue_filler_thread.start()
+        
+        # Worker Pool管理用スレッド
+        self.worker_manager_thread = Thread(target=self._manage_workers)
+        self.worker_manager_thread.daemon = True
+        self.worker_manager_thread.start()
+    
+    def _fill_job_queue(self):
+        """
+        5秒おきにDBからジョブを取得してキューに追加
+        """
+        while self._running:
+            try:
+                # キューの空き容量
+                space_available = self.job_queue.maxsize - self.job_queue.qsize()
+                if space_available > 0:
+                    # DBから見実行のジョブを取得
+                    with SessionLocal() as db:
+                        submission_list = fetch_queued_judge_and_change_status_to_running(db, space_available)
+                    for submission in submission_list:
+                        self.job_queue.put(submission)
+            except Exception as e:
+                judge_logger.error(f"Error filling job queue: {e}")
+                judge_logger.error(f"スタックトレース:\n{traceback.format_exc()}")
+
+            time.sleep(5)
+    
+    def _manage_workers(self):
+        """
+        完了したジョブの処理と新しいジョブの割り当て
+        """
+        while self._running:
+            try:
+                # 完了したジョブの処理
+                completed_jobs = self.worker_pool.collect_completed_jobs()
+                for job in completed_jobs:
+                    judge_logger.info(f"job: \"{job[0]}\", date: {job[1]}, result: {job[2]}")
+                
+                # 利用可能なワーカーにジョブを割り当て
+                while not self.job_queue.empty() and self.worker_pool.available_workers() > 0:
+                    submission = self.job_queue.get()
+                    self.worker_pool.submit_job(f"submission-{submission.id}", process_one_judge_request, submission)
+            except Exception as e:
+                judge_logger.error(f"Error managing workers: {e}")
+                judge_logger.error(f"スタックトレース:\n{traceback.format_exc()}")
+
+            # 0.1秒待機
+            time.sleep(0.1)
+    
+    def stop(self):
+        self._running = False
+        self.queue_filler_thread.join()
+        self.worker_manager_thread.join()
+
 
 class WorkerPool:
     max_workers: int
@@ -39,8 +107,6 @@ class WorkerPool:
             self.active_jobs[(job, datetime.now())] = future
             return True
         return False
-    
-worker_pool = WorkerPool(max_workers=4)
 
 def process_one_judge_request(submission: records.Submission) -> Error:
     judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, eval={submission.eval}) will be created...")
@@ -51,34 +117,6 @@ def process_one_judge_request(submission: records.Submission) -> Error:
     
     return err
 
-async def process_judge_requests():
-    while True:
-        try:
-            completed_jobrecord_list = worker_pool.collect_completed_jobs()
-            for completed_jobrecord in completed_jobrecord_list:
-                judge_logger.info(f"job: \"{completed_jobrecord[0]}\", date: {completed_jobrecord[1]}, result: {completed_jobrecord[2]}")
-            with SessionLocal() as db:
-                num_available_workers = worker_pool.available_workers()
-                queued_submissions = fetch_queued_judge_and_change_status_to_running(db, num_available_workers)
-            if queued_submissions:
-                judge_logger.info(
-                    f"{len(queued_submissions)}件のジャッジリクエストを取得しました。"
-                )
-                # スレッドプールを使用して各ジャッジリクエストを処理
-                for submission in queued_submissions:
-                    judge_logger.info(f"submission: {submission}")
-                    judge_logger.info("throw judge request to thread pool...")
-                    worker_pool.submit_job(f"submission-{submission.id}", process_one_judge_request, submission)
-            # else:
-            #     # uvicorn_logger.info("キューにジャッジリクエストはありません。")
-        except Exception as e:
-            import traceback
-            judge_logger.critical(f"例外が発生しました: {type(e).__name__}: {str(e)}")
-            judge_logger.critical(f"スタックトレース:\n{traceback.format_exc()}")
-            judge_logger.critical("データベースに接続できない可能性があります。準備ができていない可能性があります。")
-
-        await asyncio.sleep(5)  # 5秒待機
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -86,13 +124,13 @@ async def lifespan(app: FastAPI):
     define_sandbox_logger(logger=judge_logger)
     define_crud_logger(logger=judge_logger)
     judge_logger.info("LIFESPAN LOGIC INITIALIZED...")
-    task = asyncio.create_task(process_judge_requests())
+    job_manager = JobManager(max_workers=6, queue_size=20)
     yield
-    task.cancel()
+    job_manager.stop()
     judge_logger.info("LIFESPAN LOGIC DEACTIVATED...")
     # 現在実行しているジャッジリクエストを最後まで実行し、保留状態のものは破棄する
-    worker_pool.executor.shutdown(wait=True, cancel_futures=True)
-    completed_jobrecord_list = worker_pool.collect_completed_jobs()
+    job_manager.worker_pool.executor.shutdown(wait=True, cancel_futures=True)
+    completed_jobrecord_list = job_manager.worker_pool.collect_completed_jobs()
     for completed_jobrecord in completed_jobrecord_list:
         judge_logger.info(f"job: \"{completed_jobrecord[0]}\", date: {completed_jobrecord[1]}, result: {completed_jobrecord[2]}")
     # statusをrunningにしてしまっているタスクをqueuedに戻す

@@ -205,6 +205,7 @@ class Submission(Base):
     lecture_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.lecture_id"), nullable=False)
     assignment_id: Mapped[int] = mapped_column(Integer, ForeignKey("Problem.assignment_id"), nullable=False)
     eval: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    upload_dir: Mapped[str] = mapped_column(String(255), nullable=False)
     progress: Mapped[str] = mapped_column(Enum("pending", "queued", "running", "done"), default="pending")
     total_task: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_task: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -219,18 +220,9 @@ class Submission(Base):
     problem: Mapped["Problem"] = relationship(
         primaryjoin="and_(Submission.lecture_id == Problem.lecture_id, Submission.assignment_id == Problem.assignment_id)"
     )
-    
-    # Submissionレコードと1-N関係にあるUploadedFilesレコードへの参照
-    uploaded_files: Mapped[List["UploadedFiles"]] = relationship()
+
     # Submissionレコードと1-N関係にあるJudgeResultレコードへの参照
     judge_results: Mapped[List["JudgeResult"]] = relationship()
-
-
-class UploadedFiles(Base):
-    __tablename__ = "UploadedFiles"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    submission_id: Mapped[int] = mapped_column(ForeignKey("Submission.id"))
-    path: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
 class JudgeResult(Base):
