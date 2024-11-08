@@ -26,6 +26,7 @@ import tarfile
 from dotenv import load_dotenv
 import os
 import socket
+import queue
 
 load_dotenv()
 
@@ -120,7 +121,11 @@ class ContainerInfo:
             user=user,
             group_add=groups,
             cpuset_cpus=",".join([str(cpu) for cpu in cpuset]) if cpuset is not None else None,
+            # メモリーリミット (使えるRAMサイズ)
             mem_limit=f"{memoryLimitMB}m" if memoryLimitMB > 0 else None,
+            # トータルのメモリーリミット (使えるRAMサイズ + ディスクに退避できるSWAPサイズ)。これを超えて
+            # メモリを使うとOOM Killerがコンテナをkillする
+            # 現状はswapサイズは0にしており、メモリの内容はディスクに退避させない。
             memswap_limit=f"{memoryLimitMB}m" if memoryLimitMB > 0 else None,
             ulimits=ulimit_list,
             pids_limit=pidsLimit if pidsLimit > 0 else None,
@@ -155,7 +160,7 @@ class ContainerInfo:
         return Error("")
 
     # ファイルのコピー
-    def uploadFile(self, srcInHost: Path, dstInContainer: Path) -> Error:
+    def uploadFile(self, srcInHost: Path, dstInContainer: Path, uid: int = 0, gid: int = 0) -> Error:
         '''
         srcInHost=".../sample.txt"
         dstInContainer="/home/guest/"
@@ -164,7 +169,12 @@ class ContainerInfo:
         try:
             with tempfile.TemporaryFile(suffix=".tar") as tmp:
                 tar = tarfile.open(fileobj=tmp, mode="w")
-                tar.add(srcInHost, arcname=srcInHost.name)
+                # uidとgidを指定してファイルを追加
+                tarinfo = tar.gettarinfo(str(srcInHost), arcname=srcInHost.name)
+                tarinfo.uid = uid
+                tarinfo.gid = gid
+                with open(srcInHost, "rb") as f:
+                    tar.addfile(tarinfo=tarinfo, fileobj=f)
                 tar.close()
                 
                 tmp.seek(0)
@@ -180,7 +190,7 @@ class ContainerInfo:
         return Error("")
     
     # フォルダツリーごとコンテナにアップロード
-    def uploadTree(self, srcRootInHost: Path, dstRootInContainer: Path) -> Error:
+    def uploadTree(self, srcRootInHost: Path, dstRootInContainer: Path, uid: int = 0, gid: int = 0) -> Error:
         '''
         srcRootInHost=".../dir"
         (".../dir/file1.txt", ".../dir/file2.txt", ".../dir/subdir/file3.txt")
@@ -193,7 +203,11 @@ class ContainerInfo:
                 for file_path in srcRootInHost.glob("**/*"):
                     if file_path.is_file():
                         arcname = file_path.relative_to(srcRootInHost)
-                        tar.add(file_path, arcname=arcname)
+                        tarinfo = tar.gettarinfo(str(file_path), arcname=arcname)
+                        tarinfo.uid = uid
+                        tarinfo.gid = gid
+                        with open(file_path, "rb") as f:
+                            tar.addfile(tarinfo=tarinfo, fileobj=f)
                 tar.close()
                 
                 tmp.seek(0)
@@ -234,6 +248,16 @@ class ContainerInfo:
         SANDBOX_LOGGER.debug(f"start container: {self.containerID}")
 
         return Error("")
+    
+    def restart(self) -> Error:
+        try:
+            self._container.restart()
+        except APIError as e:
+            return Error(f"Failed to restart container: {e}")
+        except Exception as e:
+            return Error(f"Failed to restart container: {e}")
+        
+        return Error("")
 
     def exec_run(
         self,
@@ -242,47 +266,60 @@ class ContainerInfo:
         workDir: str = "/home/guest",
         timeoutSec: float = 10.0,
     ) -> tuple["ExecRunResult", Error]:
-        pass
         # container.exec_run(...)でコマンドを実行する
         # タイムアウト時刻を過ぎても終了しない場合はコンテナをkillする
         try:
             result = ExecRunResult()
             error = Error("")
             execution_completed = threading.Event()
+            exception_queue = queue.Queue()
             
-            def run_command():
-                start_time = time.monotonic()
-                exec_result = self._container.exec_run(
-                    cmd=command,
-                    user=user,
-                    demux=True
-                )
-                end_time = time.monotonic()
-                result.timeMS = int((end_time - start_time) * 1000)
-                result.exitCode = exec_result.exit_code
-                stdout_data, stderr_data = exec_result.output
-                result.stdout = stdout_data.decode() if stdout_data else ""
-                result.stderr = stderr_data.decode() if stderr_data else ""
-                
+            def run_command(thread_queue: queue.Queue):
+                try:
+                    start_time = time.monotonic()
+                    exec_result = self._container.exec_run(
+                        cmd=command,
+                        user=user,
+                        demux=True
+                    )
+                    end_time = time.monotonic()
+                    result.timeMS = int((end_time - start_time) * 1000)
+                    result.exitCode = exec_result.exit_code
+                    stdout_data, stderr_data = exec_result.output
+                    result.stdout = stdout_data.decode() if stdout_data else ""
+                    result.stderr = stderr_data.decode() if stderr_data else ""
+                except Exception as e:
+                    thread_queue.put(e)
                 execution_completed.set()
                 
             # コマンド実行用スレッドを開始
-            thread = threading.Thread(target=run_command)
+            thread = threading.Thread(target=run_command, args=(exception_queue,))
             thread.start()
             
             # タイムアウトまで待機、完了したら即座に終了
             if not execution_completed.wait(timeout=timeoutSec):
+                SANDBOX_LOGGER.info(f"container killing... for command: {' '.join(command)}")
                 self._container.kill()
                 error = Error(f"Command timed out after {timeoutSec} seconds. Container killed.")
                 thread.join()
             
             SANDBOX_LOGGER.debug(f"exec_run: {' '.join(command)}, err: {error}") 
             
+            if not exception_queue.empty():
+                raise exception_queue.get()
+            
             return result, error
         except APIError as e:
             return ExecRunResult(), Error(f"Failed to exec_run: {e}")
         except Exception as e:
             return ExecRunResult(), Error(f"Failed to exec_run: {e}")
+    
+    def get_status(self) -> str:
+        '''
+        戻り値: "created", "restarting", "running", "removing", "exited", "dead"
+        '''
+        self._container.reload()
+        return self._container.status
         
 
 class ExecRunResult(BaseModel):

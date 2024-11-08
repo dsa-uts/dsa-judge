@@ -7,15 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     valgrind \
     && rm -rf /var/lib/apt/lists/*
 
+# ゲストユーザー(1002:1002)を作成
+RUN groupadd -g 1002 guest && \
+    useradd -m -s /bin/bash -u 1002 -g 1002 guestt
+
 # watchdogをコピー
 # uid:gid=root:rootで、ファイルのパーミッションは700にする
-COPY watchdog /home/guest/watchdog
-RUN chown root:root /home/guest/watchdog
-RUN chmod 700 /home/guest/watchdog
-
-# ゲストユーザー(1000:1000)のホームディレクトリを作成
-RUN mkdir -p /home/guest
-RUN chown -R 1000:1000 /home/guest
-RUN chmod -R 755 /home/guest
+COPY watchdog /home/watchdog
+RUN chown root:root /home/watchdog
+RUN chmod 700 /home/watchdog
 
 WORKDIR /home/guest

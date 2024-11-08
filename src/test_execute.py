@@ -310,7 +310,7 @@ def test_Timeout():
         assert err.message == ""
 
         res, err = container.exec_run(
-            command=["./watchdog", "task.json"],
+            command=["/home/watchdog", "task.json"],
             user="root",
             workDir="/home/guest",
             timeoutSec=8.0
@@ -351,11 +351,24 @@ def test_MemoryLimit():
     test_logger.info(result)
     test_logger.info(err)
     
-    assert result.exitCode != 0
+    container._container.reload()
+    test_logger.info(f"container status: {container._container.status}")
+    
+    # メモリ制限超過により、OOM Killerがコンテナをkillする。その際、内部のプロセスもkillされ、
+    # そのプロセスの終了コードが137となる
+    assert result.exitCode == 137
     
     # コンテナを再起動
-    err = container.start()
+    # startではなくrestartを使うのは、確実にstop -> startの順でコンテナを確実に停止->起動
+    # させるためである。
+    # startの場合、コンテナがまだ停止していない場合何も副作用を起こさず、その後OOM Killerにより
+    # 停止する、といいったことが起こり、その後のexec_runリクエストを停止したコンテナに送信して
+    # 失敗するといったことが起こる。
+    err = container.restart()
     assert err.message == ""
+    
+    container._container.reload()
+    test_logger.info(f"container status: {container._container.status}")
     
     # WatchDogを用いて、メモリ制限を検出できるか確かめる
     task_info = TaskInfo(
@@ -391,7 +404,7 @@ def test_MemoryLimit():
         assert err.message == ""
         
         res, err = container.exec_run(
-            command=["./watchdog", "task.json"],
+            command=["/home/watchdog", "task.json"],
             user="root",
             workDir="/home/guest",
             timeoutSec=8.0

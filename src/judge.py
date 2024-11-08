@@ -133,7 +133,7 @@ class JudgeInfo:
 
             # watchdogによる実行
             result, err = container.exec_run(
-                command=["./watchdog", "task.json"],
+                command=["/home/watchdog", "task.json"],
                 user="root",
                 workDir="/home/guest",
                 timeoutSec=8
@@ -292,7 +292,7 @@ class JudgeInfo:
 
             # watchdogによる実行
             result, err = container.exec_run(
-                command=["./watchdog", "task.json"],
+                command=["/home/watchdog", "task.json"],
                 user="root",
                 workDir="/home/guest",
                 timeoutSec=8
@@ -462,7 +462,7 @@ class JudgeInfo:
         
         # コンテナにジャッジリクエストでアップロードされたファイルをコピーする
         abs_upload_dir = Path(UPLOAD_DIR) / str(self.submission_record.upload_dir)
-        err = build_container_info.uploadTree(srcRootInHost=abs_upload_dir, dstRootInContainer="/home/guest/")
+        err = build_container_info.uploadTree(srcRootInHost=abs_upload_dir, dstRootInContainer="/home/guest/", uid=int(GUEST_UID), gid=int(GUEST_GID))
         if not err.silence():
             self.submission_record.result = records.SubmissionSummaryStatus.IE
             self.submission_record.message = "error when copying files to build container"
@@ -476,7 +476,7 @@ class JudgeInfo:
         abs_arranged_filepaths = [RESOURCE_DIR / file.path for file in self.problem_record.arranged_files]
         
         for filepath in abs_arranged_filepaths:
-            err = build_container_info.uploadFile(srcInHost=filepath, dstInContainer="/home/guest/")
+            err = build_container_info.uploadFile(srcInHost=filepath, dstInContainer="/home/guest/", uid=int(GUEST_UID), gid=int(GUEST_GID))
             if not err.silence():
                 self.submission_record.result = records.SubmissionSummaryStatus.IE
                 self.submission_record.message = "error when copying files to build container"
@@ -535,7 +535,9 @@ class JudgeInfo:
             interactive=False,
             user="root",
             groups=["root"],
-            memoryLimitMB=1024,
+            # メモリーリミットに512MBの余裕を持たせて、watchdogがメモリーリミット超過を検知し、
+            # ユーザープログラムをkillできるようにする。
+            memoryLimitMB=self.problem_record.memoryMB + 512,
             pidsLimit=100,
             workDir="/home/guest",
             volumeMountInfoList=[
