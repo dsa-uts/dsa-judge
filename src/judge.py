@@ -20,6 +20,8 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR_PATH"))
 GUEST_UID = os.getenv("GUEST_UID")
 GUEST_GID = os.getenv("GUEST_GID")
 CGROUP_PARENT = os.getenv("CGROUP_PARENT")
+OUTPUT_LIMIT_STDOUT_BYTES = int(os.getenv("OUTPUT_LIMIT_STDOUT_BYTES"))
+OUTPUT_LIMIT_STDERR_BYTES = int(os.getenv("OUTPUT_LIMIT_STDERR_BYTES"))
 
 class JudgeInfo:
     submission_record: records.Submission # Submissionテーブル内のジャッジリクエストレコード
@@ -193,7 +195,7 @@ class JudgeInfo:
 
             except ValidationError as e:
                 judge_result.result = records.SingleJudgeStatus.IE
-                judge_result.stderr = f"watchdog error: {e}"
+                judge_result.stderr = f"validation error: {e}\nwatchdog error: {result.stderr}"
                 judge_result_list.append(judge_result)
                 # 内部エラーの場合は即座に終了する
                 return judge_result_list
@@ -204,9 +206,18 @@ class JudgeInfo:
 
             # NOTE: ビルドの際は、標準出力、標準エラー出力の確認はせず、戻り値のみの確認とする。
             # それは、Makefileによるビルドログの出力まで一致確認するのは厳格すぎるから。
+            
+            stdout_byte_size = len(judge_result.stdout.encode('utf-8'))
+            stderr_byte_size = len(judge_result.stderr.encode('utf-8'))
 
+            if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES or stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
+                judge_result.result = records.SingleJudgeStatus.OLE
+                if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES:
+                    judge_result.stderr = f"stdout is too long: {stdout_byte_size} bytes"
+                if stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
+                    judge_result.stderr = f"stderr is too long: {stderr_byte_size} bytes"
             # コンパイルエラーかチェック
-            if watchdog_result.exit_code != 0:
+            if watchdog_result.exit_code != testcase.exit_code:
                 judge_result.result = records.SingleJudgeStatus.CE
 
             # TestCaseで設定されていたコンパイルジョブが正常に実行完了した
@@ -339,7 +350,7 @@ class JudgeInfo:
                     judge_result.result = records.SingleJudgeStatus.MLE
             except ValidationError as e:
                 judge_result.result = records.SingleJudgeStatus.IE
-                judge_result.stderr = f"watchdog error: {e}"
+                judge_result.stderr = f"validation error: {e}\nwatchdog error: {result.stderr}"
                 judge_result_list.append(judge_result)
                 # 内部エラーの場合は即座に終了する
                 return judge_result_list
@@ -347,6 +358,17 @@ class JudgeInfo:
             # 進捗状況を更新
             self.submission_record.completed_task += 1
             self._update_progress_of_submission()
+
+            stdout_byte_size = len(judge_result.stdout.encode('utf-8'))
+            stderr_byte_size = len(judge_result.stderr.encode('utf-8'))
+            
+            # 出力オーバーフローチェック
+            if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES or stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
+                judge_result.result = records.SingleJudgeStatus.OLE
+                if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES:
+                    judge_result.stderr = f"stdout is too long: {stdout_byte_size} bytes"
+                if stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
+                    judge_result.stderr = f"stderr is too long: {stderr_byte_size} bytes"
 
             # TLEチェック
             if judge_result.timeMS > self.problem_record.timeMS:
@@ -361,10 +383,10 @@ class JudgeInfo:
             # Wrong Answerチェック
             elif (
                 expected_stdout is not None
-                and not StandardChecker.match(expected_stdout, watchdog_result.stdout)
+                and not StandardChecker.match(expected_stdout, judge_result.stdout)
             ) or (
                 expected_stderr is not None
-                and not StandardChecker.match(expected_stderr, watchdog_result.stderr)
+                and not StandardChecker.match(expected_stderr, judge_result.stderr)
             ):
                 judge_result.result = records.SingleJudgeStatus.WA
             elif not expected_terminate_normally and judge_result.exit_code == 0:
