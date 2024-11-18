@@ -561,6 +561,70 @@ def test_UseManyStack():
         assert err.message == ""
 
 
+def test_OutputLimitExceed():
+    client = docker.client.from_env()
+    container = ContainerInfo(
+        client=client,
+        imageName="binary-runner",
+        arguments=["sleep", "3600"],
+        interactive=False,
+        user=GUEST_UID,
+        groups=[GUEST_GID],
+        workDir="/home/guest",
+        memoryLimitMB=500,
+    )
+    err = container.start()
+    assert err.message == ""
+    
+    task_info = TaskInfo(
+        command="while true; do echo 'Hello, World!'; done",
+        stdin="",
+        timeoutMS=3000,
+        memoryLimitMB=1024,
+        uid=int(GUEST_UID),
+        gid=int(GUEST_GID),
+    )
+    
+    with TemporaryDirectory() as tmpdir:
+        with open(Path(tmpdir) / "task.json", "w") as f:
+            f.write(task_info.model_dump_json())
+        
+        err = container.uploadFile(srcInHost=Path(tmpdir) / "task.json", dstInContainer=Path("/home/guest"))
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["chown", "root:root", "/home/guest/task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=2.0
+        )
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["chmod", "600", "/home/guest/task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=2.0
+        )
+        assert err.message == ""
+        
+        res, err = container.exec_run(
+            command=["/home/watchdog", "task.json"],
+            user="root",
+            workDir="/home/guest",
+            timeoutSec=8.0
+        )
+        assert err.message == ""
+        
+        test_logger.info(res)
+        
+        watchdog_result = WatchDogResult.model_validate_json(res.stdout)
+        assert watchdog_result.OLE == True
+    
+    err = container.remove()
+    assert err.message == ""
+
+
 # 試しにジャッジリクエストを投じてみて、どのような結果になるか見てみる。
 def test_submit_judge():
     with SessionLocal() as db:

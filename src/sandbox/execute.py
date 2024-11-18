@@ -347,6 +347,7 @@ class WatchDogResult(BaseModel):
     memoryKB: int
     TLE: bool
     MLE: bool
+    OLE: bool
     
     model_config = {
         "from_attributes": True

@@ -1,18 +1,22 @@
-#include <nlohmann/json.hpp>
-#include <iostream>
-#include <chrono>
-#include <thread>
-#include <fstream>
-#include <atomic>
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <signal.h>
 #include <fcntl.h>
-#include <unistd.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <atomic>
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <nlohmann/json.hpp>
 #include <sstream>
-#include <vector>
 #include <string>
+#include <thread>
+#include <vector>
+
+#define MAX_STDOUT_LENGTH 4096
+#define MAX_STDERR_LENGTH 4096
 
 using json = nlohmann::json;
 
@@ -62,6 +66,48 @@ std::vector<pid_t> get_child_pids(pid_t parent_pid) {
   return children;
 }
 
+class BoundedString : public std::string {
+ private:
+  size_t max_capacity;
+
+ public:
+  BoundedString(size_t capacity) : max_capacity(capacity) {}
+
+  BoundedString& operator+=(const std::string& str) {
+    if (this->length() + str.length() > max_capacity) {
+      throw std::length_error("Maximum capacity exceeded");
+    }
+    std::string::operator+=(str);
+    return *this;
+  }
+
+  BoundedString& operator+=(const char* str) {
+    if (this->length() + strlen(str) > max_capacity) {
+      throw std::length_error("Maximum capacity exceeded");
+    }
+    std::string::operator+=(str);
+    return *this;
+  }
+
+  BoundedString& operator+=(char c) {
+    if (this->length() + 1 > max_capacity) {
+      throw std::length_error("Maximum capacity exceeded");
+    }
+    std::string::operator+=(c);
+    return *this;
+  }
+
+  BoundedString& operator=(const std::string& str) {
+    if (str.length() > max_capacity) {
+      throw std::length_error("Maximum capacity exceeded");
+    }
+    std::string::operator=(str);
+    return *this;
+  }
+
+  size_t remaining() const { return max_capacity - this->length(); }
+};
+
 void kill_recursive(pid_t pid) {
   try {
     // まず子プロセスを終了
@@ -72,11 +118,18 @@ void kill_recursive(pid_t pid) {
 
     // 対象プロセスを終了
     if (kill(pid, SIGKILL) < 0) {
-      std::cerr << "Failed to kill process " << pid << std::endl;
+      // std::cerr << "Failed to kill process " << pid << std::endl;
     }
   } catch (const std::exception& e) {
     std::cerr << "Error in kill_recursive: " << e.what() << std::endl;
   }
+}
+
+bool is_process_alive(pid_t pid) {
+  if (kill(pid, 0) == 0) {
+    return true;
+  }
+  return errno != ESRCH;
 }
 
 int main(int argc, char** argv) {
@@ -116,12 +169,6 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  int exit_code = -1;
-  std::string stdout_str;
-  std::string stderr_str;
-  int timeMS = 0;
-  int memoryKB = 0;
-
   int stdout_pipe[2];
   int stderr_pipe[2];
 
@@ -157,7 +204,7 @@ int main(int argc, char** argv) {
       exit(1);
     }
 
-    // 標準入力を設定 
+    // 標準入力を設定
     int stdin_pipe[2];
     if (pipe(stdin_pipe) == -1) {
       std::perror("stdin pipe failed");
@@ -200,6 +247,13 @@ int main(int argc, char** argv) {
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
 
+    int exit_code = -1;
+    BoundedString stdout_str(MAX_STDOUT_LENGTH + 100);
+    BoundedString stderr_str(MAX_STDERR_LENGTH + 100);
+    int timeMS = 0;
+    int memoryKB = 0;
+    bool OLE = false; // Output Limit Exceeded
+
     auto start_time = std::chrono::steady_clock::now();
     std::atomic<bool> finished(false);
     int64_t max_memory = 0;
@@ -214,17 +268,22 @@ int main(int argc, char** argv) {
           // printf("timeout, kill %d\n", pid);
           // shで実行している場合、子プロセスが残っているため、再帰的に終了する必要がある。
           // そうしないと、子プロセスが実行され続けてしまうし、stdoutやstderrがパイプにEOFが送られない。
+          finished.store(true);
           kill_recursive(pid);
           // printf("waitpid: %d\n", waitpid(pid, NULL, 0));
           break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
       }
+      if (is_process_alive(pid)) {
+        kill_recursive(pid);
+      }
     });
 
     // リソース監視スレッド
     std::thread monitor_thread([&]() {
       std::ifstream mem_file("/sys/fs/cgroup/memory.current");
+      char buffer[4096];
       while (!finished.load()) {
         // メモリ使用量を取得
         int64_t current_memory;
@@ -237,9 +296,55 @@ int main(int argc, char** argv) {
           max_memory = current_memory;
         }
 
-        if (current_memory > static_cast<int64_t>(memoryLimitMB) * 1024 * 1024) {
+        if (current_memory >
+            static_cast<int64_t>(memoryLimitMB) * 1024 * 1024) {
           // メモリ制限超過
-          kill_recursive(pid);
+          finished.store(true);
+          break;
+        }
+
+        // 標準出力を取得(リアルタイム)
+        try {
+          // poll stdout_pipe[0] to check it is readable
+          pollfd fds[1];
+          fds[0].fd = stdout_pipe[0];
+          fds[0].events = POLLIN;
+          int ret = poll(fds, 1, 0);
+          if (ret > 0) {
+            // if readable, read from stdout_pipe[0]
+            ssize_t count;
+            if ((count = read(stdout_pipe[0], buffer, sizeof(buffer))) > 0) {
+              // printf("reading %ld bytes from stdout\n", count);
+              stdout_str += std::string(buffer, count);
+            }
+          }
+        } catch (const std::length_error& e) {
+          stdout_str = stdout_str.substr(0, 100) + "...\n" +
+                       "stdout is too long. capacity exceeded\n";
+          finished.store(true);
+          OLE = true;
+          break;
+        }
+
+        // 標準エラーを取得(リアルタイム)
+        try {
+          // poll stderr_pipe[0] to check it is readable
+          pollfd fds[1];
+          fds[0].fd = stderr_pipe[0];
+          fds[0].events = POLLIN;
+          int ret = poll(fds, 1, 0);
+          if (ret > 0) {
+            // if readable, read from stderr_pipe[0]
+            ssize_t count;
+            if ((count = read(stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
+              // printf("reading %ld bytes from stderr\n", count);
+              stderr_str += std::string(buffer, count);
+            }
+          }
+        } catch (const std::length_error& e) {
+          stderr_str = stderr_str.substr(0, 100) + "...\n" +
+                       "stderr is too long. capacity exceeded\n";
+          finished.store(true);
           break;
         }
 
@@ -264,26 +369,46 @@ int main(int argc, char** argv) {
     // 最大メモリ使用量 (KB)
     memoryKB = static_cast<int>(max_memory) / 1024;
 
-
-    // 標準衆力と標準エラー出力を取得)
-    char buffer[4096];
-    ssize_t count;
-    std::ostringstream stdout_stream;
-    while ((count = read(stdout_pipe[0], buffer, sizeof(buffer))) > 0) {
-      stdout_stream.write(buffer, count);
+    // 残りの標準出力を取得
+    try {
+      char buffer[4096];
+      ssize_t count;
+      while ((count = read(stdout_pipe[0], buffer, sizeof(buffer))) > 0) {
+        stdout_str += std::string(buffer, count);
+      }
+    } catch (const std::length_error& e) {
+      stdout_str = stdout_str.substr(0, 100) + "...\n" +
+                   "stdout is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
     }
-    stdout_str = stdout_stream.str();
-    // printf("stdout: %s\n", stdout_str.c_str());
 
-    std::ostringstream stderr_stream;
-    while ((count = read(stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
-      stderr_stream.write(buffer, count);
+    // 残りの標準エラーを取得
+    try {
+      char buffer[4096];
+      ssize_t count;
+      while ((count = read(stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
+        stderr_str += std::string(buffer, count);
+      }
+    } catch (const std::length_error& e) {
+      stderr_str = stderr_str.substr(0, 100) + "...\n" +
+                   "stderr is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
     }
-    stderr_str = stderr_stream.str();
-    // printf("stderr: %s\n", stderr_str.c_str());
 
     close(stdout_pipe[0]);
     close(stderr_pipe[0]);
+
+    if (stdout_str.length() > MAX_STDOUT_LENGTH) {
+      stdout_str = stdout_str.substr(0, 100) + "...\n" +
+                   "stdout is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
+    }
+
+    if (stderr_str.length() > MAX_STDERR_LENGTH) {
+      stderr_str = stderr_str.substr(0, 100) + "...\n" +
+                   "stderr is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
+    }
 
     if (WIFEXITED(status)) {
       exit_code = WEXITSTATUS(status);
@@ -302,6 +427,7 @@ int main(int argc, char** argv) {
     result["memoryKB"] = memoryKB;
     result["TLE"] = timeoutMS > 0 && timeMS >= timeoutMS;
     result["MLE"] = memoryLimitMB > 0 && memoryKB / 1024 >= memoryLimitMB;
+    result["OLE"] = OLE;
     std::cout << result.dump(4) << std::endl;
   }
 }
