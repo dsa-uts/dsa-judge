@@ -529,15 +529,17 @@ class JudgeInfo:
             if exec_result.result != records.SingleJudgeStatus.AC:
                 corresponding_testcase = testcase_dict[exec_result.testcase_id]
                 self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
-            
-        if self.submission_record.result != records.SubmissionSummaryStatus.AC:
-            self.submission_record.message += "ビルドに失敗しました\n"
-            self.submission_record.judge_results = judge_result_list
-            return self._closing_procedure(
-                submission_record=self.submission_record,
-                container=build_container_info,
-                working_volume=working_volume
-            )
+
+        # NOTE: ビルドに失敗した場合は、後続のジャッジを行わない方針であったが、
+        #       ビルドに失敗した場合でもジャッジを行うようにした。
+        # if self.submission_record.result != records.SubmissionSummaryStatus.AC:
+        #     self.submission_record.message += "ビルドに失敗しました\n"
+        #     self.submission_record.judge_results = judge_result_list
+        #     return self._closing_procedure(
+        #         submission_record=self.submission_record,
+        #         container=build_container_info,
+        #         working_volume=working_volume
+        #     )
         
         # ビルドコンテナを削除
         err = build_container_info.remove()
