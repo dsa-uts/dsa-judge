@@ -371,11 +371,14 @@ class JudgeInfo:
                     judge_result.stderr = f"stderr is too long: {stderr_byte_size} bytes"
 
             # TLEチェック
-            if judge_result.timeMS > self.problem_record.timeMS:
+            if watchdog_result.TLE:
                 judge_result.result = records.SingleJudgeStatus.TLE
             # MLEチェック
-            elif judge_result.memoryKB * 1024 + 1024 > self.problem_record.memoryMB * 1024 * 1024:
+            elif watchdog_result.MLE:
                 judge_result.result = records.SingleJudgeStatus.MLE
+            # OLEチェック
+            elif watchdog_result.OLE:
+                judge_result.result = records.SingleJudgeStatus.OLE
             # RE(Runtime Errorチェック)
             elif expected_terminate_normally and judge_result.exit_code != 0:
                 # テストケースは正常終了を想定しているが、実行結果は異常終了した場合
