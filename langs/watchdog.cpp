@@ -252,6 +252,7 @@ int main(int argc, char** argv) {
     BoundedString stderr_str(MAX_STDERR_LENGTH + 100);
     int timeMS = 0;
     int memoryKB = 0;
+    bool OLE = false; // Output Limit Exceeded
 
     auto start_time = std::chrono::steady_clock::now();
     std::atomic<bool> finished(false);
@@ -321,6 +322,7 @@ int main(int argc, char** argv) {
           stdout_str = stdout_str.substr(0, 100) + "...\n" +
                        "stdout is too long. capacity exceeded\n";
           finished.store(true);
+          OLE = true;
           break;
         }
 
@@ -377,6 +379,7 @@ int main(int argc, char** argv) {
     } catch (const std::length_error& e) {
       stdout_str = stdout_str.substr(0, 100) + "...\n" +
                    "stdout is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
     }
 
     // 残りの標準エラーを取得
@@ -389,6 +392,7 @@ int main(int argc, char** argv) {
     } catch (const std::length_error& e) {
       stderr_str = stderr_str.substr(0, 100) + "...\n" +
                    "stderr is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
     }
 
     close(stdout_pipe[0]);
@@ -397,11 +401,13 @@ int main(int argc, char** argv) {
     if (stdout_str.length() > MAX_STDOUT_LENGTH) {
       stdout_str = stdout_str.substr(0, 100) + "...\n" +
                    "stdout is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
     }
 
     if (stderr_str.length() > MAX_STDERR_LENGTH) {
       stderr_str = stderr_str.substr(0, 100) + "...\n" +
                    "stderr is too long. capacity(4096bytes) exceeded\n";
+      OLE = true;
     }
 
     if (WIFEXITED(status)) {
@@ -421,6 +427,7 @@ int main(int argc, char** argv) {
     result["memoryKB"] = memoryKB;
     result["TLE"] = timeoutMS > 0 && timeMS >= timeoutMS;
     result["MLE"] = memoryLimitMB > 0 && memoryKB / 1024 >= memoryLimitMB;
+    result["OLE"] = OLE;
     std::cout << result.dump(4) << std::endl;
   }
 }
