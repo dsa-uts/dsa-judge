@@ -69,7 +69,7 @@ class JudgeInfo:
 
     def _update_progress_of_submission(self) -> None:
         with SessionLocal() as db:
-            crud.update_submission_record(db=db, submission_record=self.submission_record)
+            crud.update_submission_status_and_progress(db=db, submission_record=self.submission_record)
 
     def _exec_built_task(
         self,

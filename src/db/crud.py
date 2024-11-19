@@ -102,6 +102,25 @@ def fetch_problem(
         return None
 
 
+def update_submission_status_and_progress(db: Session, submission_record: records.Submission) -> None:
+    """
+    progress, completed_task, total_task, resultのみ更新する
+    """
+    raw_submission_record = (
+        db.query(models.Submission)
+        .filter(models.Submission.id == submission_record.id)
+        .first()
+    )
+    if raw_submission_record is None:
+        raise ValueError(f"Submission with id {submission_record.id} not found")
+    
+    raw_submission_record.progress = submission_record.progress.value
+    raw_submission_record.completed_task = submission_record.completed_task
+    raw_submission_record.total_task = submission_record.total_task
+    raw_submission_record.result = submission_record.result.value
+    db.commit()
+
+
 # 特定のSubmissionに対応するジャッジリクエストの属性値を変更する
 # 注) SubmissionRecord.idが同じレコードがテーブル内にあること
 def update_submission_record(db: Session, submission_record: records.Submission) -> None:
@@ -124,7 +143,8 @@ def update_submission_record(db: Session, submission_record: records.Submission)
     raw_submission_record.total_task = submission_record.total_task
     raw_submission_record.result = submission_record.result.value
     raw_submission_record.message = submission_record.message
-    raw_submission_record.detail = submission_record.detail
+    # detailはVARCHAR(255)なので、200文字までクリップしてそこから"..."をつける
+    raw_submission_record.detail = submission_record.detail[:200] + ("..." if len(submission_record.detail) > 200 else "")
     raw_submission_record.score = submission_record.score
     raw_submission_record.timeMS = submission_record.timeMS
     raw_submission_record.memoryKB = submission_record.memoryKB
