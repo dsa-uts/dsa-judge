@@ -112,7 +112,13 @@ def process_one_judge_request(submission: records.Submission) -> Error:
     judge_logger.debug(f"JudgeInfo(submission_id={submission.id}, lecture_id={submission.lecture_id}, assignment_id={submission.assignment_id}, eval={submission.eval}) will be created...")
     judge_info = JudgeInfo(submission)
     judge_logger.debug("START JUDGE...")
-    err = judge_info.judge()
+    err = Error.Nothing()
+    try:
+        err = judge_info.judge()
+    except Exception as e:
+        judge_logger.error(f"Error judging submission: {e}")
+        judge_logger.error(f"スタックトレース:\n{traceback.format_exc()}")
+        err.message += str(e)
     judge_logger.debug("END JUDGE")
     
     return err

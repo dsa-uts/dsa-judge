@@ -100,6 +100,18 @@ class JudgeInfo:
                 gid=int(GUEST_GID)
             )
             
+            judge_result = records.JudgeResult(
+                submission_id=self.submission_record.id,
+                testcase_id=testcase.id,
+                result=records.SingleJudgeStatus.AC,
+                command=args,
+                timeMS=0,
+                memoryKB=0,
+                exit_code=0,
+                stdout="",
+                stderr=""
+            )
+            
             # TaskInfoの内容をJSONにして/home/guest/task.jsonに書き込む
             # uid:gid=root:root, パーミッションは600
             task_info_json = task_info.model_dump_json(indent=4)
@@ -110,6 +122,13 @@ class JudgeInfo:
                 # コンテナ内にコピー
                 err = container.uploadFile(srcInHost=Path(temp_dir) / "task.json", dstInContainer=Path("/home/guest"))
                 if not err.silence():
+                    self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                    self.submission_record.result = records.SubmissionSummaryStatus.IE
+                    self.submission_record.message = f"Failed to send task information to sandbox. Please reupload or tell the administrator."
+                    self.submission_record.timeMS = 0
+                    self.submission_record.memoryKB = 0
+                    with SessionLocal() as db:
+                        crud.update_submission_record(db=db, submission_record=self.submission_record)
                     raise ValueError(f"Failed to copy task.json to container: {err.message}")
                     continue
                 
@@ -121,7 +140,15 @@ class JudgeInfo:
                     timeoutSec=2
                 )
                 if not err.silence() or res.exitCode != 0:
-                    raise ValueError(f"Failed to chown task.json: {err.message}")
+                    self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                    self.submission_record.result = records.SubmissionSummaryStatus.IE
+                    self.submission_record.message = f"Failed to setup sandbox(1), Please reupload or tell the administrator. (exit code: {res.exitCode})"
+                    self.submission_record.score = 0
+                    self.submission_record.timeMS = 0
+                    self.submission_record.memoryKB = 0
+                    with SessionLocal() as db:
+                        crud.update_submission_record(db=db, submission_record=self.submission_record)
+                    raise ValueError(f"Failed to chown task.json: {err.message} (exit code: {res.exitCode})")
 
                 # パーミッションを600にする
                 res, err = container.exec_run(
@@ -131,7 +158,15 @@ class JudgeInfo:
                     timeoutSec=2
                 )
                 if not err.silence() or res.exitCode != 0:
-                    raise ValueError(f"Failed to chmod task.json: {err.message}")
+                    self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                    self.submission_record.result = records.SubmissionSummaryStatus.IE
+                    self.submission_record.message = f"Failed to setup sandbox(2), Please reupload or tell the administrator. (exit code: {res.exitCode})"
+                    self.submission_record.score = 0
+                    self.submission_record.timeMS = 0
+                    self.submission_record.memoryKB = 0
+                    with SessionLocal() as db:
+                        crud.update_submission_record(db=db, submission_record=self.submission_record)
+                    raise ValueError(f"Failed to chmod task.json: {err.message} (exit code: {res.exitCode})")
 
             # watchdogによる実行
             result, err = container.exec_run(
@@ -139,18 +174,6 @@ class JudgeInfo:
                 user="root",
                 workDir="/home/guest",
                 timeoutSec=8
-            )
-            
-            judge_result = records.JudgeResult(
-                submission_id=self.submission_record.id,
-                testcase_id=testcase.id,
-                result=records.SingleJudgeStatus.AC,
-                command=args,
-                timeMS=0,
-                memoryKB=0,
-                exit_code=0,
-                stdout="",
-                stderr=""
             )
 
             if not err.silence():
@@ -278,6 +301,14 @@ class JudgeInfo:
                 # コンテナ内にコピー
                 err = container.uploadFile(srcInHost=Path(temp_dir) / "task.json", dstInContainer=Path("/home/guest"))
                 if not err.silence():
+                    self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                    self.submission_record.result = records.SubmissionSummaryStatus.IE
+                    self.submission_record.message = f"Failed to send task information to sandbox. Please reupload or tell the administrator."
+                    self.submission_record.score = 0
+                    self.submission_record.timeMS = 0
+                    self.submission_record.memoryKB = 0
+                    with SessionLocal() as db:
+                        crud.update_submission_record(db=db, submission_record=self.submission_record)
                     raise ValueError(f"Failed to copy task.json to container: {err.message}")
                     continue
                 
@@ -289,7 +320,15 @@ class JudgeInfo:
                     timeoutSec=2
                 )
                 if not err.silence() or res.exitCode != 0:
-                    raise ValueError(f"Failed to chown task.json: {err.message}")
+                    self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                    self.submission_record.result = records.SubmissionSummaryStatus.IE
+                    self.submission_record.message = f"Failed to setup sandbox(1), Please reupload or tell the administrator. (exit code: {res.exitCode})"
+                    self.submission_record.score = 0
+                    self.submission_record.timeMS = 0
+                    self.submission_record.memoryKB = 0
+                    with SessionLocal() as db:
+                        crud.update_submission_record(db=db, submission_record=self.submission_record)
+                    raise ValueError(f"Failed to chown task.json: {err.message} (exit code: {res.exitCode})")
 
                 # パーミッションを600にする
                 res, err = container.exec_run(
@@ -299,7 +338,15 @@ class JudgeInfo:
                     timeoutSec=2
                 )
                 if not err.silence() or res.exitCode != 0:
-                    raise ValueError(f"Failed to chmod task.json: {err.message}")
+                    self.submission_record.progress = records.SubmissionProgressStatus.DONE
+                    self.submission_record.result = records.SubmissionSummaryStatus.IE
+                    self.submission_record.message = f"Failed to setup sandbox(2), Please reupload or tell the administrator. (exit code: {res.exitCode})"
+                    self.submission_record.score = 0
+                    self.submission_record.timeMS = 0
+                    self.submission_record.memoryKB = 0
+                    with SessionLocal() as db:
+                        crud.update_submission_record(db=db, submission_record=self.submission_record)
+                    raise ValueError(f"Failed to chmod task.json: {err.message} (exit code: {res.exitCode})")
 
             # watchdogによる実行
             result, err = container.exec_run(
