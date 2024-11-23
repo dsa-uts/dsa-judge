@@ -562,24 +562,37 @@ class JudgeInfo:
         judge_result_list = []
 
         # 2. Builtテストケース(コンパイル)を実行する
-        built_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Built]
-        build_exec_result_list = self._exec_built_task(
-            container=build_container_info,
-            testcase_list=built_task_list,
-        )
-        judge_result_list += build_exec_result_list
-        
-        # ジャッジ結果の集約
-        for exec_result in build_exec_result_list:
-            self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
-            self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
-            self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
-            self.submission_record.result = max(self.submission_record.result, records.SubmissionSummaryStatus[exec_result.result.value])
+        try:
+            built_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Built]
+            build_exec_result_list = self._exec_built_task(
+                container=build_container_info,
+                testcase_list=built_task_list,
+            )
+            judge_result_list += build_exec_result_list
             
-            if exec_result.result != records.SingleJudgeStatus.AC:
-                corresponding_testcase = testcase_dict[exec_result.testcase_id]
-                self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
-
+            # ジャッジ結果の集約
+            for exec_result in build_exec_result_list:
+                self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
+                self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
+                self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
+                self.submission_record.result = max(self.submission_record.result, records.SubmissionSummaryStatus[exec_result.result.value])
+            
+                if exec_result.result != records.SingleJudgeStatus.AC:
+                    corresponding_testcase = testcase_dict[exec_result.testcase_id]
+                    self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
+        except Exception as e:
+            # ジャッジ処理の際に、内部エラーが発生した場合
+            # コンテナの削除
+            error_message = f"error when executing built test cases: {e}"
+            err = build_container_info.remove()
+            if not err.silence():
+                error_message += f"\nfailed to remove build container: {err.message}"
+            # ボリュームの削除
+            err = working_volume.remove()
+            if not err.silence():
+                error_message += f"\nfailed to remove volume: {err.message}"
+            raise ValueError(error_message)
+                
         # NOTE: ビルドに失敗した場合は、後続のジャッジを行わない方針であったが、
         #       ビルドに失敗した場合でもジャッジを行うようにした。
         # if self.submission_record.result != records.SubmissionSummaryStatus.AC:
@@ -633,23 +646,36 @@ class JudgeInfo:
                 working_volume=working_volume
             )
 
-        # Judgeテストケース(実行・チェック)を実行する
-        judge_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Judge]
-        judge_exec_result_list = self._exec_judge_task(
-            container=sandbox_container_info,
-            testcase_list=judge_task_list
-        )
-        judge_result_list += judge_exec_result_list
-        
-        for exec_result in judge_exec_result_list:
-            self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
-            self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
-            self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
-            self.submission_record.result = max(self.submission_record.result, records.SubmissionSummaryStatus[exec_result.result.value])
-            
+        try:
+            # Judgeテストケース(実行・チェック)を実行する
+            judge_task_list = [task for task in self.problem_record.test_cases if task.type == records.EvaluationType.Judge]
+            judge_exec_result_list = self._exec_judge_task(
+                container=sandbox_container_info,
+                testcase_list=judge_task_list
+            )
+            judge_result_list += judge_exec_result_list
+
+            for exec_result in judge_exec_result_list:
+                self.submission_record.timeMS = max(self.submission_record.timeMS, exec_result.timeMS)
+                self.submission_record.memoryKB = max(self.submission_record.memoryKB, exec_result.memoryKB)
+                self.submission_record.score += testcase_dict[exec_result.testcase_id].score if exec_result.result == records.SingleJudgeStatus.AC else 0
+                self.submission_record.result = max(self.submission_record.result, records.SubmissionSummaryStatus[exec_result.result.value])
+                
             if exec_result.result != records.SingleJudgeStatus.AC:
                 corresponding_testcase = testcase_dict[exec_result.testcase_id]
                 self.submission_record.detail += f"{corresponding_testcase.message_on_fail}: {exec_result.result.value} (-{corresponding_testcase.score})\n"
+        except Exception as e:
+            # ジャッジ処理の際に、内部エラーが発生した場合
+            # コンテナの削除
+            error_message = f"error when executing judge test cases: {e}"
+            err = sandbox_container_info.remove()
+            if not err.silence():
+                error_message += f"\nfailed to remove sandbox container: {err.message}"
+            # ボリュームの削除
+            err = working_volume.remove()
+            if not err.silence():
+                error_message += f"\nfailed to remove volume: {err.message}"
+            raise ValueError(error_message)
 
         self.submission_record.judge_results = judge_result_list
 
