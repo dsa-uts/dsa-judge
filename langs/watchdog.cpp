@@ -238,6 +238,10 @@ int main(int argc, char** argv) {
       dup2(stdin_pipe[0], STDIN_FILENO);
       close(stdin_pipe[0]);
 
+      // 子プロセスを回収
+      waitpid(stdin_pid, NULL, 0);
+
+      // 対象コマンドを実行
       execl("/bin/sh", "sh", "-c", command.c_str(), NULL);
       std::perror("execl failed");
       exit(1);
