@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI):
     define_sandbox_logger(logger=judge_logger)
     define_crud_logger(logger=judge_logger)
     judge_logger.info("LIFESPAN LOGIC INITIALIZED...")
-    job_manager = JobManager(max_workers=6, queue_size=20)
+    job_manager = JobManager(max_workers=4, queue_size=20)
     yield
     job_manager.stop()
     judge_logger.info("LIFESPAN LOGIC DEACTIVATED...")
