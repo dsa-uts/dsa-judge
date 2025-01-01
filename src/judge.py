@@ -236,9 +236,11 @@ class JudgeInfo:
             if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES or stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
                 judge_result.result = records.SingleJudgeStatus.OLE
                 if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES:
-                    judge_result.stderr = f"stdout is too long: {stdout_byte_size} bytes"
+                    too_long_warning = f"stdout is too long: capacity ({OUTPUT_LIMIT_STDOUT_BYTES} bytes) exceeded"
+                    judge_result.stderr = judge_result.stderr[:OUTPUT_LIMIT_STDERR_BYTES - len(too_long_warning)] + too_long_warning
                 if stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
-                    judge_result.stderr = f"stderr is too long: {stderr_byte_size} bytes"
+                    too_long_warning = f"stderr is too long: capacity ({OUTPUT_LIMIT_STDERR_BYTES} bytes) exceeded"
+                    judge_result.stderr = judge_result.stderr[:OUTPUT_LIMIT_STDERR_BYTES - len(too_long_warning)] + too_long_warning
             # コンパイルエラーかチェック
             if watchdog_result.exit_code != testcase.exit_code:
                 judge_result.result = records.SingleJudgeStatus.CE
@@ -413,9 +415,11 @@ class JudgeInfo:
             if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES or stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
                 judge_result.result = records.SingleJudgeStatus.OLE
                 if stdout_byte_size > OUTPUT_LIMIT_STDOUT_BYTES:
-                    judge_result.stderr = f"stdout is too long: {stdout_byte_size} bytes"
+                    too_long_warning = f"stdout is too long: capacity ({OUTPUT_LIMIT_STDOUT_BYTES} bytes) exceeded"
+                    judge_result.stderr = judge_result.stderr[:OUTPUT_LIMIT_STDERR_BYTES - len(too_long_warning)] + too_long_warning
                 if stderr_byte_size > OUTPUT_LIMIT_STDERR_BYTES:
-                    judge_result.stderr = f"stderr is too long: {stderr_byte_size} bytes"
+                    too_long_warning = f"stderr is too long: capacity ({OUTPUT_LIMIT_STDERR_BYTES} bytes) exceeded"
+                    judge_result.stderr = judge_result.stderr[:OUTPUT_LIMIT_STDERR_BYTES - len(too_long_warning)] + too_long_warning
 
             # TLEチェック
             if watchdog_result.TLE:
