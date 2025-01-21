@@ -69,38 +69,46 @@ std::vector<pid_t> get_child_pids(pid_t parent_pid) {
 class BoundedString : public std::string {
  private:
   size_t max_capacity;
+  std::string error_message;
+
+  void checkAndTrim(const std::string& addition) {
+    if (this->length() + addition.length() > max_capacity) {
+      std::string tmp = this->c_str();
+      tmp += addition;
+      tmp = tmp.substr(0, max_capacity - error_message.length() - 10);
+      tmp += error_message;
+      std::string::operator=(tmp);
+      throw std::length_error(error_message);
+    }
+  }
 
  public:
-  BoundedString(size_t capacity) : max_capacity(capacity) {}
+  BoundedString(size_t capacity) : max_capacity(capacity) {
+    error_message = std::string("...\n") +
+                    "capacity(" + std::to_string(capacity) + "bytes) exceeded\n";
+  }
 
   BoundedString& operator+=(const std::string& str) {
-    if (this->length() + str.length() > max_capacity) {
-      throw std::length_error("Maximum capacity exceeded");
-    }
+    checkAndTrim(str);
     std::string::operator+=(str);
     return *this;
   }
 
   BoundedString& operator+=(const char* str) {
-    if (this->length() + strlen(str) > max_capacity) {
-      throw std::length_error("Maximum capacity exceeded");
-    }
+    checkAndTrim(str);
     std::string::operator+=(str);
     return *this;
   }
 
   BoundedString& operator+=(char c) {
-    if (this->length() + 1 > max_capacity) {
-      throw std::length_error("Maximum capacity exceeded");
-    }
+    checkAndTrim(std::string(1, c));
     std::string::operator+=(c);
     return *this;
   }
 
   BoundedString& operator=(const std::string& str) {
-    if (str.length() > max_capacity) {
-      throw std::length_error("Maximum capacity exceeded");
-    }
+    std::string::operator=("");
+    checkAndTrim(str);
     std::string::operator=(str);
     return *this;
   }
@@ -323,8 +331,6 @@ int main(int argc, char** argv) {
             }
           }
         } catch (const std::length_error& e) {
-          stdout_str = stdout_str.substr(0, 100) + "...\n" +
-                       "stdout is too long. capacity exceeded\n";
           finished.store(true);
           OLE = true;
           break;
@@ -346,8 +352,6 @@ int main(int argc, char** argv) {
             }
           }
         } catch (const std::length_error& e) {
-          stderr_str = stderr_str.substr(0, 100) + "...\n" +
-                       "stderr is too long. capacity exceeded\n";
           finished.store(true);
           break;
         }
@@ -381,8 +385,6 @@ int main(int argc, char** argv) {
         stdout_str += std::string(buffer, count);
       }
     } catch (const std::length_error& e) {
-      stdout_str = stdout_str.substr(0, 100) + "...\n" +
-                   "stdout is too long. capacity(4096bytes) exceeded\n";
       OLE = true;
     }
 
@@ -394,25 +396,11 @@ int main(int argc, char** argv) {
         stderr_str += std::string(buffer, count);
       }
     } catch (const std::length_error& e) {
-      stderr_str = stderr_str.substr(0, 100) + "...\n" +
-                   "stderr is too long. capacity(4096bytes) exceeded\n";
       OLE = true;
     }
 
     close(stdout_pipe[0]);
     close(stderr_pipe[0]);
-
-    if (stdout_str.length() > MAX_STDOUT_LENGTH) {
-      stdout_str = stdout_str.substr(0, 100) + "...\n" +
-                   "stdout is too long. capacity(4096bytes) exceeded\n";
-      OLE = true;
-    }
-
-    if (stderr_str.length() > MAX_STDERR_LENGTH) {
-      stderr_str = stderr_str.substr(0, 100) + "...\n" +
-                   "stderr is too long. capacity(4096bytes) exceeded\n";
-      OLE = true;
-    }
 
     if (WIFEXITED(status)) {
       exit_code = WEXITSTATUS(status);
