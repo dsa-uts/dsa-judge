@@ -14,7 +14,7 @@ SCRIPT_DIR=$(cd $(dirname $0); pwd)
 # crunのインストール
 if ! which crun > /dev/null 2>&1; then
     echo "crunがインストールされていません。インストールを開始します。"
-    wget https://github.com/containers/crun/releases/download/1.19/crun-1.19-linux-amd64 -O /usr/local/bin/crun
+    wget https://github.com/containers/crun/releases/download/1.19.1/crun-1.19.1-linux-amd64 -O /usr/local/bin/crun
     chmod +x /usr/local/bin/crun
     echo "crunのインストールが完了しました。"
     # dockerの設定(デフォルトランタイムをcrunにする)
