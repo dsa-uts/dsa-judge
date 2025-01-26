@@ -160,14 +160,14 @@ int main(int argc, char** argv) {
    * }
    */
   std::string command;
-  std::string stdin;
+  std::string stdin_str;
   int timeoutMS = 0;
   int memoryLimitMB = 0;
   int uid = 0;
   int gid = 0;
   try {
     command = jsonData.at("command");
-    stdin = jsonData.at("stdin");
+    stdin_str = jsonData.at("stdin");
     timeoutMS = jsonData.at("timeoutMS");
     memoryLimitMB = jsonData.at("memoryLimitMB");
     uid = jsonData.at("uid");
@@ -225,8 +225,8 @@ int main(int argc, char** argv) {
     } else if (stdin_pid == 0) {
       // stdinデータを書き込む
       close(stdin_pipe[0]);
-      int remaining = stdin.size();
-      const char* ptr = stdin.c_str();
+      int remaining = stdin_str.size();
+      const char* ptr = stdin_str.c_str();
       while (remaining > 0) {
         int written = write(stdin_pipe[1], ptr, remaining);
         if (written <= 0) {
