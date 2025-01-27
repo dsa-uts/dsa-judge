@@ -177,10 +177,11 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
+  int stdin_pipe[2];
   int stdout_pipe[2];
   int stderr_pipe[2];
 
-  if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1) {
+  if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1 || pipe(stdin_pipe) == -1) {
     std::perror("pipe failed");
     exit(1);
   }
@@ -212,52 +213,21 @@ int main(int argc, char** argv) {
       exit(1);
     }
 
-    // 標準入力を設定
-    int stdin_pipe[2];
-    if (pipe(stdin_pipe) == -1) {
-      std::perror("stdin pipe failed");
-      exit(1);
-    }
-    pid_t stdin_pid = fork();
-    if (stdin_pid == -1) {
-      std::perror("stdin fork failed");
-      exit(1);
-    } else if (stdin_pid == 0) {
-      // stdinデータを書き込む
-      close(stdin_pipe[0]);
-      int remaining = stdin_str.size();
-      const char* ptr = stdin_str.c_str();
-      while (remaining > 0) {
-        int written = write(stdin_pipe[1], ptr, remaining);
-        if (written <= 0) {
-          std::perror("write to stdin pipe failed");
-          exit(1);
-        }
-        remaining -= written;
-        ptr += written;
-      }
-      close(stdin_pipe[1]);
-      // printf("stdin child finished\n");
-      exit(0);
-    } else {
-      // 子プロセスの標準入力を設定
-      close(stdin_pipe[1]);
-      close(STDIN_FILENO);
-      dup2(stdin_pipe[0], STDIN_FILENO);
-      close(stdin_pipe[0]);
+    // stdin_pipe[0]から標準入力を読み込む
+    close(stdin_pipe[1]);
+    close(STDIN_FILENO);
+    dup2(stdin_pipe[0], STDIN_FILENO);
+    close(stdin_pipe[0]);
 
-      // 子プロセスを回収
-      waitpid(stdin_pid, NULL, 0);
-
-      // 対象コマンドを実行
-      execl("/bin/sh", "sh", "-c", command.c_str(), NULL);
-      std::perror("execl failed");
-      exit(1);
-    }
+    // 対象コマンドを実行
+    execl("/bin/sh", "sh", "-c", command.c_str(), NULL);
+    std::perror("execl failed");
+    exit(1);
   } else {
     // 親プロセス
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
+    close(stdin_pipe[0]);
 
     int exit_code = -1;
     BoundedString stdout_str(MAX_STDOUT_LENGTH + 100);
@@ -360,6 +330,23 @@ int main(int argc, char** argv) {
       }
       mem_file.close();
     });
+
+    // 子プロセスに標準入力を流す
+    {
+      int remaining = stdin_str.size();
+      const char* ptr = stdin_str.c_str();
+      while (remaining > 0) {
+        int written = write(stdin_pipe[1], ptr, remaining);
+        if (written <= 0) {
+          std::perror("write to stdin pipe failed");
+          exit(1);
+        }
+        remaining -= written;
+        ptr += written;
+      }
+    }
+    // EOFを送信
+    close(stdin_pipe[1]);
 
     // 子プロセスの終了を待つ
     int status;
