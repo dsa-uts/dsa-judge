@@ -1,11 +1,14 @@
-# ベースイメージとしてPython 3.9を使用
-FROM python:3.12.4-slim
+# ベースイメージとしてPython 3.12を使用
+FROM python:3.12.9-slim-bookworm
+
+# uvのインストール
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # 作業ディレクトリの設定
 WORKDIR /app
 
 # dockerizeのバージョンを環境変数として設定
-ENV DOCKERIZE_VERSION v0.8.0
+ENV DOCKERIZE_VERSION v0.9.2
 
 # dockerizeをダウンロードしてインストール
 RUN apt-get update \
@@ -13,14 +16,27 @@ RUN apt-get update \
     && wget -O - https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-linux-amd64-$DOCKERIZE_VERSION.tar.gz | tar xzf - -C /usr/local/bin \
     && apt-get autoremove -yqq --purge wget && rm -rf /var/lib/apt/lists/*
 
-# 必要なPythonライブラリのインストール
-# (pyproject.tomlからryeによって自動生成されたrequirements.lockを使用)
-# 参考: https://rye.astral.sh/guide/docker/
-COPY requirements.lock requirements/requirements.lock
-RUN PYTHONDONTWRITEBYTECODE=1 pip install --no-cache-dir -r requirements/requirements.lock
+# 参考: https://github.com/astral-sh/uv-docker-example/blob/main/Dockerfile
+#      https://docs.astral.sh/uv/guides/integration/docker
+# Enable bytecode compilation
+ENV UV_COMPILE_BYTECODE=1
 
-# アプリケーションのソースコードをコピー
-# COPY src/ .
+# Copy from the cache instead of linking since it's a mounted volume
+ENV UV_LINK_MODE=copy
 
-# FastAPIアプリケーションの起動
-CMD ["dockerize", "-wait", "tcp://db:3306", "-timeout", "30s", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Install the project's dependencies using the logfile and settings
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
+
+# Then, add the rest of the project source code and install it
+# (Installing seperately from its dependencies allows optimal layer caching)
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# Place executables in the environment at the front of the path
+ENV PATH="/app/.venv/bin:$PATH"
+
+CMD ["dockerize", "-wait", "tcp://db:3306", "-timeout", "30s", "uvicorn", "src.judge:app", "--host", "0.0.0.0", "--reload"]

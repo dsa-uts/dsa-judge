@@ -3,15 +3,15 @@ from contextlib import asynccontextmanager
 import datetime
 from concurrent.futures import ThreadPoolExecutor, Future
 import asyncio
-from db.crud import *
-from db.models import *
-from db import records
-from db.database import SessionLocal
-from sandbox.my_error import Error
-from judge import JudgeInfo
+from .db.crud import *
+from .db.models import *
+from .db import records
+from .db.database import SessionLocal
+from .sandbox.my_error import Error
+from .judge import JudgeInfo
 
-from log.config import judge_logger
-from sandbox.execute import define_sandbox_logger
+from .log.config import judge_logger
+from .sandbox.execute import define_sandbox_logger
 from queue import Queue
 from threading import Lock, Thread
 import time

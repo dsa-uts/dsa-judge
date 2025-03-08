@@ -1,17 +1,17 @@
 from pathlib import Path
-from sandbox.execute import ContainerInfo, DockerVolume, VolumeMountInfo, TaskInfo, WatchDogResult
-from sandbox.my_error import Error
+from .sandbox.execute import ContainerInfo, DockerVolume, VolumeMountInfo, TaskInfo, WatchDogResult
+from .sandbox.my_error import Error
 from dotenv import load_dotenv
-from db import records, crud
-from db.database import SessionLocal
-from checker import StandardChecker
+from .db import records, crud
+from .db.database import SessionLocal
+from .checker import StandardChecker
 from pydantic import BaseModel, ValidationError
 import tempfile
 import os
 import docker
 
 # ロガーの設定
-from log.config import judge_logger
+from .log.config import judge_logger
 
 load_dotenv()
 

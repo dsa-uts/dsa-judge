@@ -2,10 +2,10 @@
 # $ cd src
 # $ pytest --log-cli-level=INFO test_execute.py
 import pytest
-from sandbox.execute import ContainerInfo
-from sandbox.execute import DockerVolume
-from sandbox.execute import VolumeMountInfo
-from sandbox.execute import TaskInfo, WatchDogResult
+from .sandbox.execute import ContainerInfo
+from .sandbox.execute import DockerVolume
+from .sandbox.execute import VolumeMountInfo
+from .sandbox.execute import TaskInfo, WatchDogResult
 import logging
 from datetime import timedelta
 from tempfile import TemporaryDirectory
@@ -15,8 +15,8 @@ import docker
 from dotenv import load_dotenv
 import os
 
-from db.crud import *
-from db.database import SessionLocal
+from .db.crud import *
+from .db.database import SessionLocal
 
 # ロガーの設定
 logging.basicConfig(level=logging.INFO)
@@ -469,7 +469,7 @@ def test_ForkBomb():
     err = container.start()
     assert err.message == ""
 
-    err = container.uploadFile(srcInHost=Path("sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
+    err = container.uploadFile(srcInHost=Path("/app/sources/sources/fork_bomb.sh"), dstInContainer=Path("/home/guest"))
 
     assert err.message == ""
 
@@ -504,7 +504,7 @@ def test_UseManyStack():
     err = container.start()
     assert err.message == ""
 
-    err = container.uploadFile(srcInHost=Path("sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
+    err = container.uploadFile(srcInHost=Path("/app/sources/sources/use_many_stack.c"), dstInContainer=Path("/home/guest"))
     assert err.message == ""
     
     res, err = container.exec_run(

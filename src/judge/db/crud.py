@@ -6,7 +6,7 @@ from pprint import pp
 from sqlalchemy import inspect
 from datetime import datetime, timedelta
 
-from db import models, records
+from . import models, records
 
 import logging
 
